@@ -58,7 +58,6 @@ jobs:
             name=$(echo "$line" | awk '{print $1}')
             url=$(echo "$line" | awk '{print $2}')
             depth=$(echo "$line" | awk '{print $5}')
-            [[ "$url" == "local" ]] && continue
             repo_dir="/tmp/cgit-repos/${name}.git"
             if [ ! -d "$repo_dir" ]; then
               echo "Cloning $name from $url..."

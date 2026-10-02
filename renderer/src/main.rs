@@ -277,48 +277,27 @@ fn setup_repo(cfg: &Config, repo: &Repo) {
     let repo_dir = cfg.git_base.join(format!("{}.git", repo.name));
     if repo_dir.exists() {
         println!("Updating cached repo '{}'...", repo.name);
-        if repo.url == "local" {
-            Command::new("git").arg("-C").arg(&repo_dir)
-                .args(["remote", "set-url", "origin"]).arg(&cfg.workspace).status().ok();
-            Command::new("git").arg("-C").arg(&repo_dir)
-                .args(["fetch", "origin", "+refs/heads/*:refs/heads/*", "--tags", "--prune"]).status().ok();
-        } else {
-            let depth = repo.depth.unwrap_or(20).to_string();
-            Command::new("git").arg("-C").arg(&repo_dir)
-                .args(["fetch", "--depth", &depth, "--no-tags", "--prune"]).status().ok();
-        }
+        let depth = repo.depth.unwrap_or(50).to_string();
+        Command::new("git").arg("-C").arg(&repo_dir)
+            .args(["fetch", "--depth", &depth, "--no-tags", "--prune"]).status().ok();
     } else {
         println!("Cloning repo '{}' from {}...", repo.name, repo.url);
         fs::create_dir_all(&repo_dir).ok();
-        if repo.url == "local" {
-            Command::new("git")
-                .args(["clone", "--bare"])
-                .arg(&cfg.workspace)
-                .arg(&repo_dir)
-                .status()
-                .ok();
-        } else {
-            let mut args = vec!["clone", "--bare", "--no-single-branch", "--no-tags", "--filter=blob:none"];
-            let depth_s;
-            if let Some(d) = repo.depth {
-                depth_s = d.to_string();
-                args.extend_from_slice(&["--depth", &depth_s]);
-            }
-            args.push(&repo.url);
-            let rd = repo_dir.to_string_lossy().to_string();
-            args.push(&rd);
-            Command::new("git").args(&args).status().ok();
+        let mut args = vec!["clone", "--bare", "--no-single-branch", "--no-tags", "--filter=blob:none"];
+        let depth_s;
+        if let Some(d) = repo.depth {
+            depth_s = d.to_string();
+            args.extend_from_slice(&["--depth", &depth_s]);
         }
+        args.push(&repo.url);
+        let rd = repo_dir.to_string_lossy().to_string();
+        args.push(&rd);
+        Command::new("git").args(&args).status().ok();
     }
     // Write metadata
-    let clone_url = if repo.url == "local" {
-        "https://github.com/rebizzz/git-on-github.git".to_string()
-    } else {
-        repo.url.clone()
-    };
     fs::write(repo_dir.join("description"), format!("{}\n", repo.desc)).ok();
     Command::new("git").arg("-C").arg(&repo_dir).args(["config", "gitweb.owner", &repo.owner]).status().ok();
-    Command::new("git").arg("-C").arg(&repo_dir).args(["config", "gitweb.clone-url", &clone_url]).status().ok();
+    Command::new("git").arg("-C").arg(&repo_dir).args(["config", "gitweb.clone-url", &repo.url]).status().ok();
 }
 
 struct Task {
@@ -427,10 +406,8 @@ fn render_repo(cfg: &Config, repo: &Repo) {
         t!(format!("{rel}/tree/{f}.html"),       format!("{prefix}/tree/{f}"),  "");
         t!(format!("{rel}/tree/{f}@id=HEAD.html"),format!("{prefix}/tree/{f}"), "id=HEAD");
         t!(format!("{rel}/plain/{f}"),            format!("{prefix}/plain/{f}"), "");
-        if repo.url == "local" {
-            t!(format!("{rel}/blame/{f}.html"),        format!("{prefix}/blame/{f}"), "");
-            t!(format!("{rel}/blame/{f}@id=HEAD.html"),format!("{prefix}/blame/{f}"), "id=HEAD");
-        }
+        t!(format!("{rel}/blame/{f}.html"),        format!("{prefix}/blame/{f}"), "");
+        t!(format!("{rel}/blame/{f}@id=HEAD.html"),format!("{prefix}/blame/{f}"), "id=HEAD");
     }
 
     println!("Rendering {} tasks in parallel...", tasks.len());
