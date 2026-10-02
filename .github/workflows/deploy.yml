@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  schedule:
+    # Automatically sync external repositories twice daily (every 12 hours)
+    - cron: '0 */12 * * *'
 
 concurrency:
   group: deploy
@@ -43,5 +46,5 @@ jobs:
           path: gh-pages
 
       - name: Deploy to GitHub Pages
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: success() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         uses: actions/deploy-pages@v4

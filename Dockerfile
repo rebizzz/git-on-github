@@ -3,7 +3,7 @@ FROM docker.io/library/ubuntu:latest
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends cgit git fcgiwrap nginx spawn-fcgi wget curl python3 && \
+    apt-get install -y --no-install-recommends cgit git fcgiwrap nginx spawn-fcgi wget curl python3 ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 COPY cgitrc /etc/cgitrc
