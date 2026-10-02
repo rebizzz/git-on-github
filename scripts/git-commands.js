@@ -11,11 +11,12 @@ function runGit(args, cwd = process.cwd()) {
 
 export function getRepoInfo() {
   const repoName = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/')[1] : path.basename(process.cwd());
-  const owner = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/')[0] : 'local';
+  const owner = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/')[0] : 'rebizzz';
   const desc = runGit('config --get gitweb.description') || 'A git repository hosted entirely on GitHub Actions + Pages';
   const head = runGit('rev-parse --short HEAD') || 'HEAD';
+  const headFull = runGit('rev-parse HEAD') || 'HEAD';
   const defaultBranch = runGit('rev-parse --abbrev-ref HEAD') || 'main';
-  return { repoName, owner, desc, head, defaultBranch };
+  return { repoName, owner, desc, head, headFull, defaultBranch };
 }
 
 export function getRefs() {
@@ -66,8 +67,18 @@ export function getBlob(sha) {
   return runGit(`cat-file -p ${sha}`);
 }
 
-export function getBlame(path, ref = 'HEAD') {
-  return runGit(`blame --line-porcelain ${ref} -- "${path}"`);
+export function getBlame(filePath, ref = 'HEAD') {
+  return runGit(`blame -s ${ref} -- "${filePath}"`);
+}
+
+export function getStats() {
+  const authorsRaw = runGit('shortlog -sn --all');
+  const authors = authorsRaw.split('\n').filter(Boolean).map(line => {
+    const parts = line.trim().split('\t');
+    return { count: parts[0], name: parts[1] };
+  });
+  const totalCommits = runGit('rev-list --count HEAD');
+  return { authors, totalCommits };
 }
 
 export function getReadme() {
