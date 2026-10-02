@@ -221,7 +221,10 @@ fn make_404() -> &'static str {
 <div id="cgit">
   <table id="header"><tr><td class="main"><a href="/git-on-github/">index</a></td></tr></table>
   <div class="content" style="padding:2em;font-family:monospace">
-    <div id="status-box">Loading route...</div>
+    <div id="status-box">
+      <div class="error">404 - Page not found</div>
+      <p><a href="/git-on-github/">&larr; Return to repository index</a></p>
+    </div>
   </div>
   <div class="footer">cgit on GitHub Actions</div>
 </div>
