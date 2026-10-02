@@ -9,8 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.stdout.reconfigure(line_buffering=True)
 
-WORKSPACE = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
-OUT_DIR = WORKSPACE / "gh-pages"
+WORKSPACE = Path(os.environ.get("GITHUB_WORKSPACE", "/repo" if Path("/repo/.git").exists() else os.getcwd()))
+OUT_DIR = Path(os.environ.get("CGIT_OUT_DIR", str(WORKSPACE / "gh-pages")))
 GIT_BASE = Path(os.environ.get("CGIT_REPOS_DIR", "/tmp/cgit-repos"))
 CGITRC = str(WORKSPACE / "cgitrc")
 CONFIG_FILE = WORKSPACE / "repos.conf"
@@ -273,7 +273,7 @@ def setup_repos(repos):
             if r["url"] == "local":
                 subprocess.run(["git", "clone", "--bare", str(WORKSPACE), str(repo_dir)], check=True)
             else:
-                clone_cmd = ["git", "clone", "--bare", "--no-single-branch"]
+                clone_cmd = ["git", "clone", "--bare", "--no-single-branch", "--no-tags", "--filter=blob:none"]
                 if r["depth"]:
                     clone_cmd += ["--depth", str(r["depth"])]
                 clone_cmd += [r["url"], str(repo_dir)]
@@ -291,7 +291,7 @@ def setup_repos(repos):
                 subprocess.run(["git", "-C", str(repo_dir), "remote", "set-url", "origin", str(WORKSPACE)], check=False)
                 subprocess.run(["git", "-C", str(repo_dir), "fetch", "origin", "+refs/heads/*:refs/heads/*", "--tags", "--prune"], check=False)
             else:
-                subprocess.run(["git", "-C", str(repo_dir), "fetch", "--all", "--tags", "--prune"], check=False)
+                subprocess.run(["git", "-C", str(repo_dir), "fetch", "--depth", str(r["depth"] or 20), "--no-tags", "--prune"], check=False)
             (repo_dir / "description").write_text(r["desc"] + "\n")
             subprocess.run(["git", "-C", str(repo_dir), "config", "gitweb.owner", r["owner"]], check=True)
 
@@ -337,8 +337,18 @@ def render_repository(repo_info, pool):
         tasks.append((f"{rel_root}/commit/{t}.html", f"{prefix}/commit/", f"id={t}"))
 
     # 3. Commits
-    commit_depth = 25 if repo_info["depth"] else 100
-    commits = run_git(repo_dir, ["rev-list", f"-n{commit_depth}", "--all"]).splitlines()
+    commit_depth = 20 if repo_info["depth"] else 100
+    # Get commits with their parents in one shot - no per-commit git calls
+    log_raw = run_git(repo_dir, ["log", f"-n{commit_depth}", "--all", "--format=%H %P"]).splitlines()
+    commits = []
+    parent_map = {}
+    for line in log_raw:
+        parts = line.strip().split()
+        if not parts: continue
+        sha = parts[0]
+        commits.append(sha)
+        if len(parts) > 1:
+            parent_map[sha] = parts[1]
     latest_commit = commits[0] if commits else "HEAD"
     
     for sha in commits:
@@ -355,12 +365,10 @@ def render_repository(repo_info, pool):
         tasks.append((f"{rel_root}/tree/{sha}.html", f"{prefix}/tree/", f"id={sha}"))
         tasks.append((f"{rel_root}/tree/{short_sha}.html", f"{prefix}/tree/", f"id={sha}"))
         
-        parents = run_git(repo_dir, ["log", "-1", "--format=%P", sha]).split()
-        for p in parents:
-            p_sha = p.strip()
-            if p_sha:
-                tasks.append((f"{rel_root}/diff/{sha}_{p_sha}.html", f"{prefix}/diff/", f"id={sha}&id2={p_sha}"))
-                tasks.append((f"{rel_root}/diff/{short_sha}_{p_sha[:7]}.html", f"{prefix}/diff/", f"id={sha}&id2={p_sha}"))
+        p_sha = parent_map.get(sha, "")
+        if p_sha:
+            tasks.append((f"{rel_root}/diff/{sha}_{p_sha}.html", f"{prefix}/diff/", f"id={sha}&id2={p_sha}"))
+            tasks.append((f"{rel_root}/diff/{short_sha}_{p_sha[:7]}.html", f"{prefix}/diff/", f"id={sha}&id2={p_sha}"))
 
     tasks.append((f"{rel_root}/commit/HEAD.html", f"{prefix}/commit/", f"id={latest_commit}"))
     tasks.append((f"{rel_root}/diff/HEAD.html", f"{prefix}/diff/", f"id={latest_commit}"))
@@ -368,26 +376,18 @@ def render_repository(repo_info, pool):
     tasks.append((f"{rel_root}/tree/HEAD.html", f"{prefix}/tree/", f"id={latest_commit}"))
 
     # 4. Files
-    files = run_git(repo_dir, ["ls-tree", "-r", "--name-only", "HEAD"]).splitlines()
-    capped_files = files if len(files) < 60 else files[:50]
-    sample_commits = commits[:5]
+    files = run_git(repo_dir, ["ls-tree", "--name-only", "HEAD"]).splitlines()
+    capped_files = files[:30]
     
     for filepath in capped_files:
         filepath = filepath.strip()
         if not filepath: continue
         tasks.append((f"{rel_root}/tree/{filepath}.html", f"{prefix}/tree/{filepath}", ""))
         tasks.append((f"{rel_root}/tree/{filepath}@id=HEAD.html", f"{prefix}/tree/{filepath}", "id=HEAD"))
-        tasks.append((f"{rel_root}/blame/{filepath}.html", f"{prefix}/blame/{filepath}", ""))
-        tasks.append((f"{rel_root}/blame/{filepath}@id=HEAD.html", f"{prefix}/blame/{filepath}", "id=HEAD"))
         tasks.append((f"{rel_root}/plain/{filepath}", f"{prefix}/plain/{filepath}", ""))
-        
-        for sha in sample_commits:
-            tasks.append((f"{rel_root}/tree/{filepath}@id={sha}.html", f"{prefix}/tree/{filepath}", f"id={sha}"))
-            tasks.append((f"{rel_root}/tree/{filepath}@id={sha[:7]}.html", f"{prefix}/tree/{filepath}", f"id={sha[:7]}"))
-            tasks.append((f"{rel_root}/blame/{filepath}@id={sha}.html", f"{prefix}/blame/{filepath}", f"id={sha}"))
-            tasks.append((f"{rel_root}/blame/{filepath}@id={sha[:7]}.html", f"{prefix}/blame/{filepath}", f"id={sha[:7]}"))
-            tasks.append((f"{rel_root}/plain/{filepath}@id={sha}", f"{prefix}/plain/{filepath}", f"id={sha}"))
-            tasks.append((f"{rel_root}/diff/{filepath}@id={sha}.html", f"{prefix}/diff/{filepath}", f"id={sha}"))
+        if repo_info["url"] == "local":
+            tasks.append((f"{rel_root}/blame/{filepath}.html", f"{prefix}/blame/{filepath}", ""))
+            tasks.append((f"{rel_root}/blame/{filepath}@id=HEAD.html", f"{prefix}/blame/{filepath}", "id=HEAD"))
 
     print(f"Executing {len(tasks)} parallel render tasks for '{name}'...")
     list(pool.map(render_task, tasks))

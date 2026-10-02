@@ -7,7 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
   schedule:
-    # Automatically sync external repositories twice daily (every 12 hours)
     - cron: '0 */12 * * *'
 
 concurrency:
@@ -20,11 +19,72 @@ permissions:
   id-token: write
 
 jobs:
-  build-and-deploy:
+  sync-repos:
     runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cache-key.outputs.key }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate cache key
+        id: cache-key
+        run: |
+          KEY="cgit-repos-${{ hashFiles('repos.conf') }}-$(date +%Y-%m-%d)"
+          echo "key=$KEY" >> $GITHUB_OUTPUT
+
+      - name: Restore cached repos
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/cgit-repos
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: |
+            cgit-repos-${{ hashFiles('repos.conf') }}-
+            cgit-repos-
+
+      - name: Install git
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo apt-get install -y -qq git
+
+      - name: Clone/update external repos
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git config --global --add safe.directory '*'
+          mkdir -p /tmp/cgit-repos
+          while IFS= read -r line; do
+            [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+            name=$(echo "$line" | awk '{print $1}')
+            url=$(echo "$line" | awk '{print $2}')
+            depth=$(echo "$line" | awk '{print $5}')
+            [[ "$url" == "local" ]] && continue
+            repo_dir="/tmp/cgit-repos/${name}.git"
+            if [ ! -d "$repo_dir" ]; then
+              echo "Cloning $name from $url..."
+              depth_arg=""
+              [[ -n "$depth" ]] && depth_arg="--depth $depth"
+              git clone --bare --no-single-branch --no-tags --filter=blob:none $depth_arg "$url" "$repo_dir"
+            else
+              echo "Updating $name..."
+              git -C "$repo_dir" fetch --all --no-tags --prune || true
+            fi
+          done < repos.conf
+
+      - name: Save repos cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/cgit-repos
+          key: ${{ steps.cache-key.outputs.key }}
+
+  render-and-deploy:
+    runs-on: ubuntu-latest
+    needs: sync-repos
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -32,31 +92,45 @@ jobs:
       - name: Install native cgit & dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends cgit git python3
+          sudo apt-get install -y -qq --no-install-recommends cgit git
 
-      - name: Cache external Git repositories
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo build
         uses: actions/cache@v4
         with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            renderer/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('renderer/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build Rust cgit-renderer
+        run: cargo build --release
+        working-directory: renderer
+
+      - name: Restore cached external repos
+        uses: actions/cache/restore@v4
+        with:
           path: /tmp/cgit-repos
-          key: cgit-repos-${{ hashFiles('repos.conf') }}-${{ github.run_id }}
+          key: ${{ needs.sync-repos.outputs.cache-key }}
           restore-keys: |
             cgit-repos-${{ hashFiles('repos.conf') }}-
             cgit-repos-
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Render all cgit pages natively in parallel
-        run: python3 render-all-cgit.py
+      - name: Render all cgit pages in parallel (Rust)
+        run: ./renderer/target/release/cgit-renderer
 
       - name: Upload gh-pages artifact
-        if: success()
         uses: actions/upload-pages-artifact@v3
         with:
           path: gh-pages
 
       - name: Deploy to GitHub Pages
-        if: success() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request'
         uses: actions/deploy-pages@v4

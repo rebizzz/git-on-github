@@ -1,0 +1,11 @@
+[package]
+name = "cgit-renderer"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "cgit-renderer"
+path = "src/main.rs"
+
+[dependencies]
+rayon = "1"
