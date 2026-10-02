@@ -150,8 +150,13 @@ jobs:
           test -f gh-pages/404.html
           test -f gh-pages/cgit-css/cgit.css
           test -f gh-pages/curl.git/tree/src/index.html
+          test -f gh-pages/curl.git/tree/include/curl/multi.h/index.html
+          test -f gh-pages/curl.git/tree/include/curl/multi.h.html
+          test -f gh-pages/curl.git/plain/include/curl/multi.h
+          test -f gh-pages/curl.git/blame/include/curl/multi.h/index.html
           test -f gh-pages/curl.git/about/index.html
           test -f gh-pages/cgit.git/tree/index.html
+          test -f gh-pages/cgit.git/tree/cgit.c/index.html
           test -f gh-pages/ripgrep.git/log/index.html
           echo "All structural sanity checks passed!"
 

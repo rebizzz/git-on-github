@@ -193,7 +193,22 @@ fn run_cgit(cfg: &Config, path_info: &str, query_string: &str) -> Vec<u8> {
 fn save_page(out_dir: &Path, rel_path: &str, content: &[u8]) {
     let dest = out_dir.join(rel_path);
     if let Some(parent) = dest.parent() {
+        if parent.is_file() {
+            fs::remove_file(parent).ok();
+        }
+        let mut cur = out_dir.to_path_buf();
+        if let Ok(rel) = parent.strip_prefix(out_dir) {
+            for comp in rel.components() {
+                cur.push(comp);
+                if cur.is_file() {
+                    fs::remove_file(&cur).ok();
+                }
+            }
+        }
         fs::create_dir_all(parent).ok();
+    }
+    if dest.is_dir() {
+        fs::remove_dir_all(&dest).ok();
     }
     fs::write(&dest, content).ok();
 }
@@ -372,7 +387,7 @@ fn setup_repo(cfg: &Config, repo: &Repo) {
 }
 
 struct Task {
-    rel_path: String,
+    rel_paths: Vec<String>,
     path_info: String,
     query_string: String,
 }
@@ -408,102 +423,103 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     let mut tasks: Vec<Task> = Vec::new();
 
     macro_rules! t {
-        ($rel:expr, $pi:expr, $qs:expr) => {
-            tasks.push(Task { rel_path: $rel.to_string(), path_info: $pi.to_string(), query_string: $qs.to_string() });
+        ($paths:expr, $pi:expr, $qs:expr) => {
+            tasks.push(Task {
+                rel_paths: $paths,
+                path_info: $pi.to_string(),
+                query_string: $qs.to_string(),
+            });
         };
     }
 
-    t!(format!("{rel}/index.html"),          format!("{prefix}/"),        "");
-    t!(format!("{rel}/summary/index.html"),  format!("{prefix}/"),        "");
-    t!(format!("{rel}/about/index.html"),    format!("{prefix}/about/"),  "");
-    t!(format!("{rel}/refs/index.html"),     format!("{prefix}/refs/"),   "");
-    t!(format!("{rel}/stats/index.html"),    format!("{prefix}/stats/"),  "");
-    t!(format!("{rel}/atom/index.html"),     format!("{prefix}/atom/"),   "");
-    t!(format!("{rel}/atom/index.xml"),      format!("{prefix}/atom/"),   "");
-    t!(format!("{rel}/log/index.html"),      format!("{prefix}/log/"),    "");
-    t!(format!("{rel}/tree/index.html"),     format!("{prefix}/tree/"),   "");
+    t!(vec![format!("{rel}/index.html"), format!("{rel}/summary/index.html")], format!("{prefix}/"), "");
+    t!(vec![format!("{rel}/about/index.html")],   format!("{prefix}/about/"), "");
+    t!(vec![format!("{rel}/refs/index.html")],    format!("{prefix}/refs/"), "");
+    t!(vec![format!("{rel}/stats/index.html")],   format!("{prefix}/stats/"), "");
+    t!(vec![format!("{rel}/atom/index.html"), format!("{rel}/atom/index.xml")], format!("{prefix}/atom/"), "");
+    t!(vec![format!("{rel}/log/index.html")],     format!("{prefix}/log/"), "");
+    t!(vec![format!("{rel}/tree/index.html")],    format!("{prefix}/tree/"), "");
 
     for b in &branches {
         let b = b.trim();
-        t!(format!("{rel}/log/{b}.html"),  format!("{prefix}/log/"),  format!("h={b}"));
-        t!(format!("{rel}/tree/{b}.html"), format!("{prefix}/tree/"), format!("h={b}"));
+        t!(vec![format!("{rel}/log/{b}.html")],  format!("{prefix}/log/"),  format!("h={b}"));
+        t!(vec![format!("{rel}/tree/{b}.html")], format!("{prefix}/tree/"), format!("h={b}"));
     }
 
     for t_name in &tags {
         let t_name = t_name.trim();
-        t!(format!("{rel}/tag/{t_name}.html"),    format!("{prefix}/tag/"),    format!("h={t_name}"));
-        t!(format!("{rel}/commit/{t_name}.html"), format!("{prefix}/commit/"), format!("id={t_name}"));
+        t!(vec![format!("{rel}/tag/{t_name}.html")],    format!("{prefix}/tag/"),    format!("h={t_name}"));
+        t!(vec![format!("{rel}/commit/{t_name}.html")], format!("{prefix}/commit/"), format!("id={t_name}"));
     }
 
     for sha in &commits {
         let sha = sha.trim();
         let s = &sha[..7.min(sha.len())];
-        t!(format!("{rel}/commit/{sha}.html"),  format!("{prefix}/commit/"), format!("id={sha}"));
-        t!(format!("{rel}/commit/{s}.html"),    format!("{prefix}/commit/"), format!("id={sha}"));
-        t!(format!("{rel}/diff/{sha}.html"),    format!("{prefix}/diff/"),   format!("id={sha}"));
-        t!(format!("{rel}/diff/{s}.html"),      format!("{prefix}/diff/"),   format!("id={sha}"));
-        t!(format!("{rel}/patch/{sha}.patch"),  format!("{prefix}/patch/"),  format!("id={sha}"));
-        t!(format!("{rel}/patch/{s}.patch"),    format!("{prefix}/patch/"),  format!("id={sha}"));
-        t!(format!("{rel}/tree/{sha}.html"),    format!("{prefix}/tree/"),   format!("id={sha}"));
-        t!(format!("{rel}/tree/{s}.html"),      format!("{prefix}/tree/"),   format!("id={sha}"));
+        t!(vec![format!("{rel}/commit/{sha}.html"), format!("{rel}/commit/{s}.html")], format!("{prefix}/commit/"), format!("id={sha}"));
+        t!(vec![format!("{rel}/diff/{sha}.html"), format!("{rel}/diff/{s}.html")],     format!("{prefix}/diff/"),   format!("id={sha}"));
+        t!(vec![format!("{rel}/patch/{sha}.patch"), format!("{rel}/patch/{s}.patch")], format!("{prefix}/patch/"),  format!("id={sha}"));
+        t!(vec![format!("{rel}/tree/{sha}.html"), format!("{rel}/tree/{s}.html")],     format!("{prefix}/tree/"),   format!("id={sha}"));
         
         if let Some(p_sha) = parent_map.get(sha.trim()) {
             let ps = &p_sha[..7.min(p_sha.len())];
-            t!(format!("{rel}/diff/{sha}_{p_sha}.html"), format!("{prefix}/diff/"), format!("id={sha}&id2={p_sha}"));
-            t!(format!("{rel}/diff/{s}_{ps}.html"),      format!("{prefix}/diff/"), format!("id={sha}&id2={p_sha}"));
+            t!(vec![format!("{rel}/diff/{sha}_{p_sha}.html"), format!("{rel}/diff/{s}_{ps}.html")], format!("{prefix}/diff/"), format!("id={sha}&id2={p_sha}"));
         }
     }
 
-    t!(format!("{rel}/commit/HEAD.html"), format!("{prefix}/commit/"), format!("id={latest_commit}"));
-    t!(format!("{rel}/diff/HEAD.html"),   format!("{prefix}/diff/"),   format!("id={latest_commit}"));
-    t!(format!("{rel}/patch/HEAD.patch"), format!("{prefix}/patch/"),  format!("id={latest_commit}"));
-    t!(format!("{rel}/tree/HEAD.html"),   format!("{prefix}/tree/"),   format!("id={latest_commit}"));
+    t!(vec![format!("{rel}/commit/HEAD.html")], format!("{prefix}/commit/"), format!("id={latest_commit}"));
+    t!(vec![format!("{rel}/diff/HEAD.html")],   format!("{prefix}/diff/"),   format!("id={latest_commit}"));
+    t!(vec![format!("{rel}/patch/HEAD.patch")], format!("{prefix}/patch/"),  format!("id={latest_commit}"));
+    t!(vec![format!("{rel}/tree/HEAD.html")],   format!("{prefix}/tree/"),   format!("id={latest_commit}"));
 
-    // Tree exploration: parse mode & type to handle directories and files
-    let tree_raw = run_git(&repo_dir, &["ls-tree", "HEAD"]);
+    // Full recursive tree exploration
+    let tree_raw = run_git(&repo_dir, &["ls-tree", "-r", "-t", "HEAD"]);
     for line in tree_raw.lines() {
         let parts: Vec<&str> = line.splitn(2, '\t').collect();
         if parts.len() < 2 { continue; }
         let meta: Vec<&str> = parts[0].split_whitespace().collect();
         if meta.len() < 3 { continue; }
         let obj_type = meta[1];
-        let name = parts[1].trim();
+        let path = parts[1].trim();
+        if path.is_empty() { continue; }
 
         if obj_type == "tree" {
-            // Directory! Save index.html + .html so /tree/dir/ works immediately
-            t!(format!("{rel}/tree/{name}/index.html"), format!("{prefix}/tree/{name}"), "");
-            t!(format!("{rel}/tree/{name}.html"), format!("{prefix}/tree/{name}"), "");
-            t!(format!("{rel}/tree/{name}@id=HEAD.html"), format!("{prefix}/tree/{name}"), "id=HEAD");
-
-            // Also render files inside this directory
-            let sub_raw = run_git(&repo_dir, &["ls-tree", &format!("HEAD:{name}")]);
-            for sub_line in sub_raw.lines().take(30) {
-                let sub_parts: Vec<&str> = sub_line.splitn(2, '\t').collect();
-                if sub_parts.len() < 2 { continue; }
-                let sub_meta: Vec<&str> = sub_parts[0].split_whitespace().collect();
-                if sub_meta.len() < 3 { continue; }
-                let sub_type = sub_meta[1];
-                let sub_name = sub_parts[1].trim();
-                let full_sub = format!("{name}/{sub_name}");
-
-                if sub_type == "tree" {
-                    t!(format!("{rel}/tree/{full_sub}/index.html"), format!("{prefix}/tree/{full_sub}"), "");
-                    t!(format!("{rel}/tree/{full_sub}.html"), format!("{prefix}/tree/{full_sub}"), "");
-                } else {
-                    t!(format!("{rel}/tree/{full_sub}.html"), format!("{prefix}/tree/{full_sub}"), "");
-                    t!(format!("{rel}/tree/{full_sub}@id=HEAD.html"), format!("{prefix}/tree/{full_sub}"), "id=HEAD");
-                    t!(format!("{rel}/plain/{full_sub}"), format!("{prefix}/plain/{full_sub}"), "");
-                    t!(format!("{rel}/blame/{full_sub}.html"), format!("{prefix}/blame/{full_sub}"), "");
-                    t!(format!("{rel}/blame/{full_sub}@id=HEAD.html"), format!("{prefix}/blame/{full_sub}"), "id=HEAD");
-                }
-            }
-        } else {
-            // Root file
-            t!(format!("{rel}/tree/{name}.html"), format!("{prefix}/tree/{name}"), "");
-            t!(format!("{rel}/tree/{name}@id=HEAD.html"), format!("{prefix}/tree/{name}"), "id=HEAD");
-            t!(format!("{rel}/plain/{name}"), format!("{prefix}/plain/{name}"), "");
-            t!(format!("{rel}/blame/{name}.html"), format!("{prefix}/blame/{name}"), "");
-            t!(format!("{rel}/blame/{name}@id=HEAD.html"), format!("{prefix}/blame/{name}"), "id=HEAD");
+            // Directory tree view
+            t!(
+                vec![
+                    format!("{rel}/tree/{path}/index.html"),
+                    format!("{rel}/tree/{path}.html"),
+                    format!("{rel}/tree/{path}@id=HEAD.html"),
+                ],
+                format!("{prefix}/tree/{path}"),
+                ""
+            );
+        } else if obj_type == "blob" {
+            // File blob view
+            t!(
+                vec![
+                    format!("{rel}/tree/{path}/index.html"),
+                    format!("{rel}/tree/{path}.html"),
+                    format!("{rel}/tree/{path}@id=HEAD.html"),
+                ],
+                format!("{prefix}/tree/{path}"),
+                ""
+            );
+            // Plain text view
+            t!(
+                vec![format!("{rel}/plain/{path}")],
+                format!("{prefix}/plain/{path}"),
+                ""
+            );
+            // Blame view
+            t!(
+                vec![
+                    format!("{rel}/blame/{path}/index.html"),
+                    format!("{rel}/blame/{path}.html"),
+                    format!("{rel}/blame/{path}@id=HEAD.html"),
+                ],
+                format!("{prefix}/blame/{path}"),
+                ""
+            );
         }
     }
 
@@ -516,7 +532,9 @@ fn render_repo(cfg: &Config, repo: &Repo) {
         if content.is_empty() {
             *errors.lock().unwrap() += 1;
         }
-        save_page(out_dir, &task.rel_path, &content);
+        for rel_path in &task.rel_paths {
+            save_page(out_dir, rel_path, &content);
+        }
     });
     let e = *errors.lock().unwrap();
     if e > 0 { println!("  {} tasks produced empty output", e); }

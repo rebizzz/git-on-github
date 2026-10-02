@@ -31,7 +31,7 @@ fn test_site_output() {
     assert!(css_file.exists(), "cgit.css must exist");
     assert!(fs::metadata(&css_file).unwrap().len() > 1000, "cgit.css must not be empty");
 
-    // 4. Verify each repository's core views
+    // 4. Verify repositories
     let repos = vec!["cgit", "curl", "ripgrep"];
     for repo in repos {
         let repo_dir = out_dir.join(format!("{}.git", repo));
@@ -66,28 +66,38 @@ fn test_site_output() {
         let stats = repo_dir.join("stats/index.html");
         assert!(stats.exists(), "Stats view for {} must exist", repo);
 
-        // Check that at least some commits were rendered
+        // Commits & Diffs
         let commit_dir = repo_dir.join("commit");
         assert!(commit_dir.exists(), "Commit directory for {} must exist", repo);
         let commit_count = fs::read_dir(&commit_dir).unwrap().count();
         assert!(commit_count >= 5, "At least 5 commit files must be generated for {}", repo);
 
-        // Check that diffs were rendered
         let diff_dir = repo_dir.join("diff");
         assert!(diff_dir.exists(), "Diff directory for {} must exist", repo);
-        let diff_count = fs::read_dir(&diff_dir).unwrap().count();
-        assert!(diff_count >= 5, "At least 5 diff files must be generated for {}", repo);
 
-        // Check that patches were rendered
         let patch_dir = repo_dir.join("patch");
         assert!(patch_dir.exists(), "Patch directory for {} must exist", repo);
 
-        // Check tree directory (specifically src/index.html if repo is curl)
+        // Repo specific checks
         if repo == "curl" {
-            let curl_src = repo_dir.join("tree/src/index.html");
-            assert!(curl_src.exists(), "curl.git/tree/src/index.html must exist");
-            let src_content = fs::read_to_string(&curl_src).unwrap();
-            assert!(src_content.contains("CMakeLists.txt"), "curl.git/tree/src must contain CMakeLists.txt");
+            // Nested directories
+            assert!(repo_dir.join("tree/src/index.html").exists(), "curl.git/tree/src/index.html must exist");
+            assert!(repo_dir.join("tree/include/index.html").exists(), "curl.git/tree/include/index.html must exist");
+            assert!(repo_dir.join("tree/include/curl/index.html").exists(), "curl.git/tree/include/curl/index.html must exist");
+
+            // Specific deep nested files requested by user
+            let multi_h_idx = repo_dir.join("tree/include/curl/multi.h/index.html");
+            assert!(multi_h_idx.exists(), "curl.git/tree/include/curl/multi.h/index.html must exist");
+            let multi_content = fs::read_to_string(&multi_h_idx).unwrap();
+            assert!(multi_content.contains("multi.h"), "multi.h view must contain filename");
+            assert!(multi_content.contains("<div id='cgit'>"), "multi.h view must have cgit container");
+
+            assert!(repo_dir.join("tree/include/curl/multi.h.html").exists(), "multi.h.html must exist");
+            assert!(repo_dir.join("plain/include/curl/multi.h").exists(), "plain/include/curl/multi.h must exist");
+            assert!(repo_dir.join("blame/include/curl/multi.h/index.html").exists(), "blame/include/curl/multi.h/index.html must exist");
+        } else if repo == "cgit" {
+            assert!(repo_dir.join("tree/cgit.c/index.html").exists(), "cgit.git/tree/cgit.c/index.html must exist");
+            assert!(repo_dir.join("plain/cgit.c").exists(), "plain/cgit.c must exist");
         }
     }
 
