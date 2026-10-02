@@ -1,6 +1,10 @@
-FROM alpine:edge
+FROM docker.io/library/ubuntu:latest
 
-RUN apk add --no-cache cgit git fcgiwrap nginx spawn-fcgi wget
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends cgit git fcgiwrap nginx spawn-fcgi wget curl && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY cgitrc /etc/cgitrc
 COPY nginx.conf /etc/nginx/nginx.conf

@@ -1,18 +1,15 @@
 #!/bin/sh
 set -e
 
-# Allow dubious ownership
 git config --global --add safe.directory '*'
 
-# Setup directories
 mkdir -p /run /var/git/git-on-github.git
 git clone --bare /repo /var/git/git-on-github.git
-git -C /var/git/git-on-github.git config gitweb.description "A real cgit instance running inside Docker and scraped via GitHub Actions"
+echo "git-on-github - A git repository wholly rendered by real cgit on GitHub Actions" > /var/git/git-on-github.git/description
 git -C /var/git/git-on-github.git config gitweb.owner "rebizzz"
+chown -R www-data:www-data /var/git
 
-# Start fcgiwrap
-spawn-fcgi -s /run/fcgiwrap.sock -u nginx -g nginx -- /usr/bin/fcgiwrap
+spawn-fcgi -s /run/fcgiwrap.sock -u www-data -g www-data -- /usr/sbin/fcgiwrap
 chmod 777 /run/fcgiwrap.sock
 
-# Start nginx in foreground
-nginx -g "daemon off;"
+exec nginx -g "daemon off;"

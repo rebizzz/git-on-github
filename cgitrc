@@ -1,9 +1,8 @@
-css=/cgit.css
-logo=/cgit.png
-favicon=/favicon.ico
+css=/cgit-css/cgit.css
+logo=/cgit-css/cgit.png
+favicon=/cgit-css/favicon.ico
 main-title=git-on-github
 
-# Repository configuration
 scan-path=/var/git
 enable-http-clone=1
 enable-git-config=1
