@@ -44,31 +44,35 @@ jobs:
             cgit-repos-${{ hashFiles('repos.conf') }}-
             cgit-repos-
 
-      - name: Install git
+      - name: Install git and python3
         if: steps.cache.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y -qq git
+        run: sudo apt-get install -y -qq git python3
 
       - name: Clone/update external repos
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           git config --global --add safe.directory '*'
           mkdir -p /tmp/cgit-repos
-          while IFS= read -r line; do
-            [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
-            name=$(echo "$line" | awk '{print $1}')
-            url=$(echo "$line" | awk '{print $2}')
-            depth=$(echo "$line" | awk '{print $5}')
-            repo_dir="/tmp/cgit-repos/${name}.git"
-            if [ ! -d "$repo_dir" ]; then
-              echo "Cloning $name from $url..."
-              depth_arg=""
-              [[ -n "$depth" ]] && depth_arg="--depth $depth"
-              git clone --bare --no-single-branch --no-tags --filter=blob:none $depth_arg "$url" "$repo_dir"
-            else
-              echo "Updating $name..."
-              git -C "$repo_dir" fetch --all --no-tags --prune || true
-            fi
-          done < repos.conf
+          python3 -c '
+          import shlex, subprocess, os
+          with open("repos.conf") as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or line.startswith("#"): continue
+                  parts = shlex.split(line)
+                  name, url = parts[0], parts[1]
+                  depth = parts[4] if len(parts) > 4 else None
+                  repo_dir = f"/tmp/cgit-repos/{name}.git"
+                  if not os.path.exists(repo_dir):
+                      print(f"Cloning {name} from {url}...")
+                      cmd = ["git", "clone", "--bare", "--no-single-branch", "--no-tags", "--filter=blob:none"]
+                      if depth: cmd += ["--depth", depth]
+                      cmd += [url, repo_dir]
+                      subprocess.run(cmd, check=True)
+                  else:
+                      print(f"Updating {name}...")
+                      subprocess.run(["git", "-C", repo_dir, "fetch", "--all", "--no-tags", "--prune"], check=False)
+          '
 
       - name: Save repos cache
         if: steps.cache.outputs.cache-hit != 'true'
