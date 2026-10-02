@@ -144,6 +144,17 @@ jobs:
           echo "Merged structure:"
           ls -la gh-pages/
 
+      - name: Verify site structure
+        run: |
+          test -f gh-pages/index.html
+          test -f gh-pages/404.html
+          test -f gh-pages/cgit-css/cgit.css
+          test -f gh-pages/curl.git/tree/src/index.html
+          test -f gh-pages/curl.git/about/index.html
+          test -f gh-pages/cgit.git/tree/index.html
+          test -f gh-pages/ripgrep.git/log/index.html
+          echo "All structural sanity checks passed!"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

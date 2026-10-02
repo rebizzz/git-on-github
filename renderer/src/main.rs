@@ -24,6 +24,8 @@ impl Config {
                 .unwrap_or_else(|_| {
                     if Path::new("/repo/.git").exists() {
                         "/repo".into()
+                    } else if Path::new("../cgitrc").exists() {
+                        Path::new("..").canonicalize().unwrap().to_string_lossy().into()
                     } else {
                         env::current_dir().unwrap().to_string_lossy().into()
                     }
@@ -37,9 +39,26 @@ impl Config {
         );
         let cgit_bin = PathBuf::from(
             env::var("CGIT_BIN").unwrap_or_else(|_| {
-                for p in &["/usr/lib/cgit/cgit.cgi", "/usr/libexec/cgit/cgit.cgi"] {
+                for p in &[
+                    "/usr/lib/cgit/cgit.cgi",
+                    "/usr/libexec/cgit/cgit.cgi",
+                    "/run/current-system/sw/cgit/cgit.cgi",
+                ] {
                     if Path::new(p).exists() {
                         return p.to_string();
+                    }
+                }
+                if let Ok(path_var) = env::var("PATH") {
+                    for dir in env::split_paths(&path_var) {
+                        for candidate in &[
+                            dir.join("cgit.cgi"),
+                            dir.join("cgit"),
+                            dir.parent().map(|p| p.join("cgit/cgit.cgi")).unwrap_or_default(),
+                        ] {
+                            if candidate.is_file() {
+                                return candidate.to_string_lossy().to_string();
+                            }
+                        }
                     }
                 }
                 "cgit".into()
@@ -47,8 +66,21 @@ impl Config {
         );
         let cgit_share = PathBuf::from(
             env::var("CGIT_SHARE").unwrap_or_else(|_| {
-                for p in &["/usr/share/cgit", "/usr/lib/cgit"] {
-                    if Path::new(p).exists() {
+                if let Some(parent) = cgit_bin.parent() {
+                    if parent.join("cgit.css").exists() {
+                        return parent.to_string_lossy().to_string();
+                    }
+                }
+                let local_assets = workspace.join("assets");
+                if local_assets.join("cgit.css").exists() {
+                    return local_assets.to_string_lossy().to_string();
+                }
+                for p in &[
+                    "/usr/share/cgit",
+                    "/usr/lib/cgit",
+                    "/nix/var/nix/profiles/default/share/cgit",
+                ] {
+                    if Path::new(p).join("cgit.css").exists() {
                         return p.to_string();
                     }
                 }
@@ -240,23 +272,53 @@ fn make_404() -> &'static str {
     if (!m) return;
     var rp = "/git-on-github/" + m[1] + ".git";
     var sub = m[2] || "";
-    var t = null;
-    if (/\/commit$/.test(sub)) t = rp + "/commit/" + id + ".html";
-    else if (/\/diff$/.test(sub)) t = rp + "/diff/" + (id2 ? id+"_"+id2 : id) + ".html";
-    else if (/\/patch$/.test(sub)) t = rp + "/patch/" + id + ".patch";
-    else if (/\/tree$/.test(sub)) t = rp + "/tree/" + id + ".html";
-    else if (/\/log$/.test(sub)) t = rp + "/log/" + id + ".html";
-    else if (sub.startsWith("/tree/")) t = rp + "/tree/" + sub.slice(6) + "@id=" + id + ".html";
-    else if (sub.startsWith("/blame/")) t = rp + "/blame/" + sub.slice(7) + "@id=" + id + ".html";
-    else if (sub.startsWith("/plain/")) t = rp + "/plain/" + sub.slice(7) + "@id=" + id;
-    else if (sub.startsWith("/diff/")) t = rp + "/diff/" + sub.slice(6) + "@id=" + id + ".html";
-    if (!t) return;
-    fetch(t).then(function(r) {
-      if (!r.ok && t.includes("@id=")) return fetch(t.split("@id=")[0]+".html");
-      return r;
-    }).then(function(r) { return r.text(); })
-    .then(function(html) { document.open(); document.write(html); document.close(); })
-    .catch(function() {});
+    var cands = [];
+    if (/\/commit$/.test(sub)) {
+      cands.push(rp + "/commit/" + id + ".html");
+    } else if (/\/diff$/.test(sub)) {
+      if (id2) cands.push(rp + "/diff/" + id + "_" + id2 + ".html");
+      cands.push(rp + "/diff/" + id + ".html");
+    } else if (/\/patch$/.test(sub)) {
+      cands.push(rp + "/patch/" + id + ".patch");
+    } else if (/\/tree$/.test(sub)) {
+      cands.push(rp + "/tree/" + id + ".html");
+      cands.push(rp + "/tree/index.html");
+    } else if (/\/log$/.test(sub)) {
+      cands.push(rp + "/log/" + id + ".html");
+      cands.push(rp + "/log/index.html");
+    } else if (sub.startsWith("/tree/")) {
+      var item = sub.slice(6);
+      cands.push(rp + "/tree/" + item + "/index.html");
+      cands.push(rp + "/tree/" + item + ".html");
+      cands.push(rp + "/tree/" + item + "@id=" + id + ".html");
+    } else if (sub.startsWith("/blame/")) {
+      var item = sub.slice(7);
+      cands.push(rp + "/blame/" + item + ".html");
+      cands.push(rp + "/blame/" + item + "@id=" + id + ".html");
+    } else if (sub.startsWith("/plain/")) {
+      var item = sub.slice(7);
+      cands.push(rp + "/plain/" + item);
+      cands.push(rp + "/plain/" + item + "@id=" + id);
+    } else if (sub.startsWith("/diff/")) {
+      var item = sub.slice(6);
+      cands.push(rp + "/diff/" + item + "@id=" + id + ".html");
+      cands.push(rp + "/diff/" + item + ".html");
+    }
+    
+    function tryFetch(i) {
+      if (i >= cands.length) return;
+      fetch(cands[i]).then(function(r) {
+        if (!r.ok) { tryFetch(i + 1); return; }
+        return r.text().then(function(html) {
+          document.open();
+          document.write(html);
+          document.close();
+        });
+      }).catch(function() {
+        tryFetch(i + 1);
+      });
+    }
+    if (cands.length > 0) tryFetch(0);
   }
   document.readyState === 'loading'
     ? document.addEventListener('DOMContentLoaded', handleRoute)
@@ -343,9 +405,6 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     }
     let latest_commit = commits.first().cloned().unwrap_or_else(|| "HEAD".to_string());
 
-    let files_raw = run_git(&repo_dir, &["ls-tree", "--name-only", "HEAD"]);
-    let files: Vec<&str> = files_raw.lines().filter(|f| !f.is_empty()).take(30).collect();
-
     let mut tasks: Vec<Task> = Vec::new();
 
     macro_rules! t {
@@ -400,13 +459,52 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     t!(format!("{rel}/patch/HEAD.patch"), format!("{prefix}/patch/"),  format!("id={latest_commit}"));
     t!(format!("{rel}/tree/HEAD.html"),   format!("{prefix}/tree/"),   format!("id={latest_commit}"));
 
-    for f in &files {
-        let f = f.trim();
-        t!(format!("{rel}/tree/{f}.html"),       format!("{prefix}/tree/{f}"),  "");
-        t!(format!("{rel}/tree/{f}@id=HEAD.html"),format!("{prefix}/tree/{f}"), "id=HEAD");
-        t!(format!("{rel}/plain/{f}"),            format!("{prefix}/plain/{f}"), "");
-        t!(format!("{rel}/blame/{f}.html"),        format!("{prefix}/blame/{f}"), "");
-        t!(format!("{rel}/blame/{f}@id=HEAD.html"),format!("{prefix}/blame/{f}"), "id=HEAD");
+    // Tree exploration: parse mode & type to handle directories and files
+    let tree_raw = run_git(&repo_dir, &["ls-tree", "HEAD"]);
+    for line in tree_raw.lines() {
+        let parts: Vec<&str> = line.splitn(2, '\t').collect();
+        if parts.len() < 2 { continue; }
+        let meta: Vec<&str> = parts[0].split_whitespace().collect();
+        if meta.len() < 3 { continue; }
+        let obj_type = meta[1];
+        let name = parts[1].trim();
+
+        if obj_type == "tree" {
+            // Directory! Save index.html + .html so /tree/dir/ works immediately
+            t!(format!("{rel}/tree/{name}/index.html"), format!("{prefix}/tree/{name}"), "");
+            t!(format!("{rel}/tree/{name}.html"), format!("{prefix}/tree/{name}"), "");
+            t!(format!("{rel}/tree/{name}@id=HEAD.html"), format!("{prefix}/tree/{name}"), "id=HEAD");
+
+            // Also render files inside this directory
+            let sub_raw = run_git(&repo_dir, &["ls-tree", &format!("HEAD:{name}")]);
+            for sub_line in sub_raw.lines().take(30) {
+                let sub_parts: Vec<&str> = sub_line.splitn(2, '\t').collect();
+                if sub_parts.len() < 2 { continue; }
+                let sub_meta: Vec<&str> = sub_parts[0].split_whitespace().collect();
+                if sub_meta.len() < 3 { continue; }
+                let sub_type = sub_meta[1];
+                let sub_name = sub_parts[1].trim();
+                let full_sub = format!("{name}/{sub_name}");
+
+                if sub_type == "tree" {
+                    t!(format!("{rel}/tree/{full_sub}/index.html"), format!("{prefix}/tree/{full_sub}"), "");
+                    t!(format!("{rel}/tree/{full_sub}.html"), format!("{prefix}/tree/{full_sub}"), "");
+                } else {
+                    t!(format!("{rel}/tree/{full_sub}.html"), format!("{prefix}/tree/{full_sub}"), "");
+                    t!(format!("{rel}/tree/{full_sub}@id=HEAD.html"), format!("{prefix}/tree/{full_sub}"), "id=HEAD");
+                    t!(format!("{rel}/plain/{full_sub}"), format!("{prefix}/plain/{full_sub}"), "");
+                    t!(format!("{rel}/blame/{full_sub}.html"), format!("{prefix}/blame/{full_sub}"), "");
+                    t!(format!("{rel}/blame/{full_sub}@id=HEAD.html"), format!("{prefix}/blame/{full_sub}"), "id=HEAD");
+                }
+            }
+        } else {
+            // Root file
+            t!(format!("{rel}/tree/{name}.html"), format!("{prefix}/tree/{name}"), "");
+            t!(format!("{rel}/tree/{name}@id=HEAD.html"), format!("{prefix}/tree/{name}"), "id=HEAD");
+            t!(format!("{rel}/plain/{name}"), format!("{prefix}/plain/{name}"), "");
+            t!(format!("{rel}/blame/{name}.html"), format!("{prefix}/blame/{name}"), "");
+            t!(format!("{rel}/blame/{name}@id=HEAD.html"), format!("{prefix}/blame/{name}"), "id=HEAD");
+        }
     }
 
     println!("Rendering {} tasks in parallel for '{}'...", tasks.len(), repo.name);
