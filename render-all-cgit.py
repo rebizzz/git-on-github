@@ -7,6 +7,8 @@ import shlex
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
+sys.stdout.reconfigure(line_buffering=True)
+
 WORKSPACE = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
 OUT_DIR = WORKSPACE / "gh-pages"
 GIT_BASE = Path(os.environ.get("CGIT_REPOS_DIR", "/tmp/cgit-repos"))
@@ -271,7 +273,7 @@ def setup_repos(repos):
             if r["url"] == "local":
                 subprocess.run(["git", "clone", "--bare", str(WORKSPACE), str(repo_dir)], check=True)
             else:
-                clone_cmd = ["git", "clone", "--bare"]
+                clone_cmd = ["git", "clone", "--bare", "--no-single-branch"]
                 if r["depth"]:
                     clone_cmd += ["--depth", str(r["depth"])]
                 clone_cmd += [r["url"], str(repo_dir)]
@@ -319,8 +321,8 @@ def render_repository(repo_info, pool):
     tasks.append((f"{rel_root}/tree/index.html", f"{prefix}/tree/", ""))
     
     # 2. Branches and Tags
-    branches = run_git(repo_dir, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]).splitlines()
-    tags = run_git(repo_dir, ["for-each-ref", "--format=%(refname:short)", "refs/tags"]).splitlines()
+    branches = run_git(repo_dir, ["for-each-ref", "--sort=-committerdate", "--count=25", "--format=%(refname:short)", "refs/heads"]).splitlines()
+    tags = run_git(repo_dir, ["for-each-ref", "--sort=-creatordate", "--count=20", "--format=%(refname:short)", "refs/tags"]).splitlines()
     
     for b in branches:
         b = b.strip()
@@ -328,14 +330,14 @@ def render_repository(repo_info, pool):
         tasks.append((f"{rel_root}/log/{b}.html", f"{prefix}/log/", f"h={b}"))
         tasks.append((f"{rel_root}/tree/{b}.html", f"{prefix}/tree/", f"h={b}"))
         
-    for t in tags[:25]:
+    for t in tags:
         t = t.strip()
         if not t: continue
         tasks.append((f"{rel_root}/tag/{t}.html", f"{prefix}/tag/", f"h={t}"))
         tasks.append((f"{rel_root}/commit/{t}.html", f"{prefix}/commit/", f"id={t}"))
 
     # 3. Commits
-    commit_depth = 40 if repo_info["depth"] else 150
+    commit_depth = 25 if repo_info["depth"] else 100
     commits = run_git(repo_dir, ["rev-list", f"-n{commit_depth}", "--all"]).splitlines()
     latest_commit = commits[0] if commits else "HEAD"
     
