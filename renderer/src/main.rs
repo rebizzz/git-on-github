@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
+#[allow(dead_code)]
 struct Config {
     workspace: PathBuf,
     out_dir: PathBuf,
@@ -60,7 +61,7 @@ impl Config {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Repo {
     name: String,
     url: String,
@@ -72,11 +73,11 @@ struct Repo {
 fn parse_repos_conf(path: &Path) -> Vec<Repo> {
     if !path.exists() {
         return vec![Repo {
-            name: "git-on-github".into(),
-            url: "local".into(),
-            desc: "git-on-github - A git repository wholly rendered by real cgit on GitHub Actions".into(),
-            owner: "rebizzz".into(),
-            depth: None,
+            name: "cgit".into(),
+            url: "https://git.zx2c4.com/cgit".into(),
+            desc: "A hyperfast web frontend for git repositories written in C".into(),
+            owner: "Jason A. Donenfeld".into(),
+            depth: Some(50),
         }];
     }
     let content = fs::read_to_string(path).unwrap_or_default();
@@ -124,6 +125,7 @@ fn shell_split(s: &str) -> Vec<&str> {
 
 fn run_git(repo_path: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
+        .args(["-c", "safe.directory=*"])
         .arg("-C")
         .arg(repo_path)
         .args(args)
@@ -147,7 +149,6 @@ fn run_cgit(cfg: &Config, path_info: &str, query_string: &str) -> Vec<u8> {
         .expect("cgit.cgi failed");
 
     let body = &out.stdout;
-    // Strip HTTP headers (find double newline)
     if let Some(pos) = body.windows(4).position(|w| w == b"\r\n\r\n") {
         return body[pos + 4..].to_vec();
     }
@@ -236,7 +237,7 @@ fn make_404() -> &'static str {
     var id = params.get('id') || params.get('h') || 'HEAD';
     var id2 = params.get('id2');
     var m = path.match(/\/git-on-github\/([^\/]+)\.git(\/.*)?$/);
-    if (!m) { showError(); return; }
+    if (!m) return;
     var rp = "/git-on-github/" + m[1] + ".git";
     var sub = m[2] || "";
     var t = null;
@@ -249,19 +250,13 @@ fn make_404() -> &'static str {
     else if (sub.startsWith("/blame/")) t = rp + "/blame/" + sub.slice(7) + "@id=" + id + ".html";
     else if (sub.startsWith("/plain/")) t = rp + "/plain/" + sub.slice(7) + "@id=" + id;
     else if (sub.startsWith("/diff/")) t = rp + "/diff/" + sub.slice(6) + "@id=" + id + ".html";
-    if (!t) { showError(); return; }
+    if (!t) return;
     fetch(t).then(function(r) {
       if (!r.ok && t.includes("@id=")) return fetch(t.split("@id=")[0]+".html");
       return r;
     }).then(function(r) { return r.text(); })
     .then(function(html) { document.open(); document.write(html); document.close(); })
-    .catch(showError);
-  }
-  function showError() {
-    document.title = "404";
-    document.getElementById("status-box").innerHTML =
-      "<div class='error'>404 - Not found: <code>" + location.pathname + location.search + "</code></div>" +
-      "<p><a href='/git-on-github/'>&larr; index</a></p>";
+    .catch(function() {});
   }
   document.readyState === 'loading'
     ? document.addEventListener('DOMContentLoaded', handleRoute)
@@ -275,29 +270,43 @@ fn make_404() -> &'static str {
 
 fn setup_repo(cfg: &Config, repo: &Repo) {
     let repo_dir = cfg.git_base.join(format!("{}.git", repo.name));
-    if repo_dir.exists() {
+    let has_commits = Command::new("git")
+        .args(["-c", "safe.directory=*"])
+        .arg("-C")
+        .arg(&repo_dir)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if has_commits {
         println!("Updating cached repo '{}'...", repo.name);
-        let depth = repo.depth.unwrap_or(50).to_string();
-        Command::new("git").arg("-C").arg(&repo_dir)
+        let depth = repo.depth.unwrap_or(30).to_string();
+        Command::new("git").args(["-c", "safe.directory=*"]).arg("-C").arg(&repo_dir)
             .args(["fetch", "--depth", &depth, "--no-tags", "--prune"]).status().ok();
     } else {
         println!("Cloning repo '{}' from {}...", repo.name, repo.url);
+        fs::remove_dir_all(&repo_dir).ok();
         fs::create_dir_all(&repo_dir).ok();
-        let mut args = vec!["clone", "--bare", "--no-single-branch", "--no-tags", "--filter=blob:none"];
-        let depth_s;
-        if let Some(d) = repo.depth {
-            depth_s = d.to_string();
-            args.extend_from_slice(&["--depth", &depth_s]);
-        }
-        args.push(&repo.url);
-        let rd = repo_dir.to_string_lossy().to_string();
-        args.push(&rd);
+        let depth_s = repo.depth.unwrap_or(30).to_string();
+        let repo_dir_str = repo_dir.to_string_lossy().to_string();
+        let args = vec![
+            "-c",
+            "safe.directory=*",
+            "clone",
+            "--bare",
+            "--no-single-branch",
+            "--no-tags",
+            "--depth",
+            &depth_s,
+            &repo.url,
+            &repo_dir_str,
+        ];
         Command::new("git").args(&args).status().ok();
     }
-    // Write metadata
     fs::write(repo_dir.join("description"), format!("{}\n", repo.desc)).ok();
-    Command::new("git").arg("-C").arg(&repo_dir).args(["config", "gitweb.owner", &repo.owner]).status().ok();
-    Command::new("git").arg("-C").arg(&repo_dir).args(["config", "gitweb.clone-url", &repo.url]).status().ok();
+    Command::new("git").args(["-c", "safe.directory=*"]).arg("-C").arg(&repo_dir).args(["config", "gitweb.owner", &repo.owner]).status().ok();
+    Command::new("git").args(["-c", "safe.directory=*"]).arg("-C").arg(&repo_dir).args(["config", "gitweb.clone-url", &repo.url]).status().ok();
 }
 
 struct Task {
@@ -313,16 +322,14 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     
     println!("\n--- Rendering '{}' ---", repo.name);
 
-    // Collect branch info
     let branches_raw = run_git(&repo_dir, &["for-each-ref", "--sort=-committerdate", "--count=25", "--format=%(refname:short)", "refs/heads"]);
     let branches: Vec<&str> = branches_raw.lines().collect();
     let tags_raw = run_git(&repo_dir, &["for-each-ref", "--sort=-creatordate", "--count=20", "--format=%(refname:short)", "refs/tags"]);
     let tags: Vec<&str> = tags_raw.lines().collect();
     
-    let default_branch = branches.first().copied().unwrap_or("main");
+    let default_branch = branches.first().copied().unwrap_or("master");
     
-    // Get commits + parents in one shot
-    let log_raw = run_git(&repo_dir, &["log", "-n80", "--all", "--format=%H %P"]);
+    let log_raw = run_git(&repo_dir, &["log", "-n30", "--all", "--format=%H %P"]);
     let mut commits: Vec<String> = Vec::new();
     let mut parent_map: HashMap<String, String> = HashMap::new();
     for line in log_raw.lines() {
@@ -336,11 +343,9 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     }
     let latest_commit = commits.first().cloned().unwrap_or_else(|| "HEAD".to_string());
 
-    // Files (top-level only)
     let files_raw = run_git(&repo_dir, &["ls-tree", "--name-only", "HEAD"]);
     let files: Vec<&str> = files_raw.lines().filter(|f| !f.is_empty()).take(30).collect();
 
-    // Build task list
     let mut tasks: Vec<Task> = Vec::new();
 
     macro_rules! t {
@@ -349,7 +354,6 @@ fn render_repo(cfg: &Config, repo: &Repo) {
         };
     }
 
-    // Base views
     t!(format!("{rel}/index.html"),          format!("{prefix}/"),        "");
     t!(format!("{rel}/summary/index.html"),  format!("{prefix}/"),        "");
     t!(format!("{rel}/about/index.html"),    format!("{prefix}/about/"),  "");
@@ -360,21 +364,18 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     t!(format!("{rel}/log/index.html"),      format!("{prefix}/log/"),    "");
     t!(format!("{rel}/tree/index.html"),     format!("{prefix}/tree/"),   "");
 
-    // Branches
     for b in &branches {
         let b = b.trim();
         t!(format!("{rel}/log/{b}.html"),  format!("{prefix}/log/"),  format!("h={b}"));
         t!(format!("{rel}/tree/{b}.html"), format!("{prefix}/tree/"), format!("h={b}"));
     }
 
-    // Tags
     for t_name in &tags {
         let t_name = t_name.trim();
         t!(format!("{rel}/tag/{t_name}.html"),    format!("{prefix}/tag/"),    format!("h={t_name}"));
         t!(format!("{rel}/commit/{t_name}.html"), format!("{prefix}/commit/"), format!("id={t_name}"));
     }
 
-    // Commits
     for sha in &commits {
         let sha = sha.trim();
         let s = &sha[..7.min(sha.len())];
@@ -394,13 +395,11 @@ fn render_repo(cfg: &Config, repo: &Repo) {
         }
     }
 
-    // HEAD aliases
     t!(format!("{rel}/commit/HEAD.html"), format!("{prefix}/commit/"), format!("id={latest_commit}"));
     t!(format!("{rel}/diff/HEAD.html"),   format!("{prefix}/diff/"),   format!("id={latest_commit}"));
     t!(format!("{rel}/patch/HEAD.patch"), format!("{prefix}/patch/"),  format!("id={latest_commit}"));
     t!(format!("{rel}/tree/HEAD.html"),   format!("{prefix}/tree/"),   format!("id={latest_commit}"));
 
-    // Files
     for f in &files {
         let f = f.trim();
         t!(format!("{rel}/tree/{f}.html"),       format!("{prefix}/tree/{f}"),  "");
@@ -410,9 +409,8 @@ fn render_repo(cfg: &Config, repo: &Repo) {
         t!(format!("{rel}/blame/{f}@id=HEAD.html"),format!("{prefix}/blame/{f}"), "id=HEAD");
     }
 
-    println!("Rendering {} tasks in parallel...", tasks.len());
+    println!("Rendering {} tasks in parallel for '{}'...", tasks.len(), repo.name);
 
-    // Parallel render via rayon
     let out_dir = &cfg.out_dir;
     let errors = Mutex::new(0u32);
     tasks.par_iter().for_each(|task| {
@@ -425,7 +423,6 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     let e = *errors.lock().unwrap();
     if e > 0 { println!("  {} tasks produced empty output", e); }
 
-    // Dispatchers (sequential, fast)
     save_str(out_dir, &format!("{rel}/commit/index.html"), &make_dispatcher(&repo.name, "commit", &latest_commit));
     save_str(out_dir, &format!("{rel}/diff/index.html"),   &make_dispatcher(&repo.name, "diff",   &latest_commit));
     save_str(out_dir, &format!("{rel}/patch/index.html"),  make_patch_dispatcher());
@@ -457,45 +454,59 @@ fn copy_assets(cfg: &Config) {
 
 fn main() {
     let cfg = Config::new();
+    let args: Vec<String> = env::args().collect();
+    
+    let repo_filter = args.windows(2).find(|w| w[0] == "--repo").map(|w| w[1].clone());
+    let base_only = args.iter().any(|a| a == "--base");
 
     println!("cgit binary:  {}", cfg.cgit_bin.display());
     println!("cgit share:   {}", cfg.cgit_share.display());
-    println!("workspace:    {}", cfg.workspace.display());
     println!("output dir:   {}", cfg.out_dir.display());
     println!("repos dir:    {}", cfg.git_base.display());
 
-    let repos = parse_repos_conf(&cfg.repos_conf);
-    println!("Repos: {:?}", repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>());
-
-    // Setup/update all repos
-    Command::new("git").args(["config", "--global", "--add", "safe.directory", "*"]).status().ok();
+    let all_repos = parse_repos_conf(&cfg.repos_conf);
     fs::create_dir_all(&cfg.git_base).ok();
-    for r in &repos {
+
+    if base_only {
+        println!("Rendering site base (index, 404, assets)...");
+        for r in &all_repos {
+            let r_dir = cfg.git_base.join(format!("{}.git", r.name));
+            if !r_dir.exists() {
+                fs::create_dir_all(&r_dir).ok();
+                Command::new("git").args(["-c", "safe.directory=*"]).arg("-C").arg(&r_dir).args(["init", "--bare"]).status().ok();
+            }
+            fs::write(r_dir.join("description"), format!("{}\n", r.desc)).ok();
+            Command::new("git").args(["-c", "safe.directory=*"]).arg("-C").arg(&r_dir).args(["config", "gitweb.owner", &r.owner]).status().ok();
+        }
+        
+        let index = run_cgit(&cfg, "/", "");
+        save_page(&cfg.out_dir, "index.html", &index);
+        save_str(&cfg.out_dir, "404.html", make_404());
+        copy_assets(&cfg);
+        println!("Site base complete!");
+        return;
+    }
+
+    let repos_to_render: Vec<Repo> = if let Some(ref target) = repo_filter {
+        all_repos.into_iter().filter(|r| r.name == *target).collect()
+    } else {
+        all_repos
+    };
+
+    println!("Target repos: {:?}", repos_to_render.iter().map(|r| r.name.as_str()).collect::<Vec<_>>());
+
+    for r in &repos_to_render {
         setup_repo(&cfg, r);
-    }
-
-    // Wipe output and recreate
-    if cfg.out_dir.exists() {
-        fs::remove_dir_all(&cfg.out_dir).ok();
-    }
-    fs::create_dir_all(&cfg.out_dir).ok();
-
-    // Render each repo
-    for r in &repos {
         render_repo(&cfg, r);
     }
 
-    // Site index
-    println!("Rendering site index...");
-    let index = run_cgit(&cfg, "/", "");
-    save_page(&cfg.out_dir, "index.html", &index);
+    if repo_filter.is_none() {
+        println!("Rendering site index...");
+        let index = run_cgit(&cfg, "/", "");
+        save_page(&cfg.out_dir, "index.html", &index);
+        save_str(&cfg.out_dir, "404.html", make_404());
+        copy_assets(&cfg);
+    }
 
-    // 404 router
-    save_str(&cfg.out_dir, "404.html", make_404());
-
-    // Static assets
-    println!("Copying assets...");
-    copy_assets(&cfg);
-
-    println!("\nAll done!");
+    println!("\nExecution completed successfully!");
 }

@@ -19,83 +19,11 @@ permissions:
   id-token: write
 
 jobs:
-  sync-repos:
+  build-renderer:
     runs-on: ubuntu-latest
-    outputs:
-      cache-key: ${{ steps.cache-key.outputs.key }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Generate cache key
-        id: cache-key
-        run: |
-          KEY="cgit-repos-${{ hashFiles('repos.conf') }}-$(date +%Y-%m-%d)"
-          echo "key=$KEY" >> $GITHUB_OUTPUT
-
-      - name: Restore cached repos
-        id: cache
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/cgit-repos
-          key: ${{ steps.cache-key.outputs.key }}
-          restore-keys: |
-            cgit-repos-${{ hashFiles('repos.conf') }}-
-            cgit-repos-
-
-      - name: Install git and python3
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y -qq git python3
-
-      - name: Clone/update external repos
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          git config --global --add safe.directory '*'
-          mkdir -p /tmp/cgit-repos
-          python3 -c '
-          import shlex, subprocess, os
-          with open("repos.conf") as f:
-              for line in f:
-                  line = line.strip()
-                  if not line or line.startswith("#"): continue
-                  parts = shlex.split(line)
-                  name, url = parts[0], parts[1]
-                  depth = parts[4] if len(parts) > 4 else None
-                  repo_dir = f"/tmp/cgit-repos/{name}.git"
-                  if not os.path.exists(repo_dir):
-                      print(f"Cloning {name} from {url}...")
-                      cmd = ["git", "clone", "--bare", "--no-single-branch", "--no-tags", "--filter=blob:none"]
-                      if depth: cmd += ["--depth", depth]
-                      cmd += [url, repo_dir]
-                      subprocess.run(cmd, check=True)
-                  else:
-                      print(f"Updating {name}...")
-                      subprocess.run(["git", "-C", repo_dir, "fetch", "--all", "--no-tags", "--prune"], check=False)
-          '
-
-      - name: Save repos cache
-        if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: /tmp/cgit-repos
-          key: ${{ steps.cache-key.outputs.key }}
-
-  render-and-deploy:
-    runs-on: ubuntu-latest
-    needs: sync-repos
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install native cgit & dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends cgit git
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -109,7 +37,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             renderer/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('renderer/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('renderer/Cargo.toml', 'renderer/src/**') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -117,19 +45,106 @@ jobs:
         run: cargo build --release
         working-directory: renderer
 
-      - name: Restore cached external repos
-        uses: actions/cache/restore@v4
+      - name: Upload compiled binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cgit-renderer-bin
+          path: renderer/target/release/cgit-renderer
+
+  render-base:
+    runs-on: ubuntu-latest
+    needs: build-renderer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native cgit
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends cgit git
+
+      - name: Download cgit-renderer binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cgit-renderer-bin
+          path: bin
+
+      - name: Render site base
+        run: |
+          chmod +x bin/cgit-renderer
+          ./bin/cgit-renderer --base
+
+      - name: Upload site-base artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-base
+          path: gh-pages/
+
+  render-repo:
+    runs-on: ubuntu-latest
+    needs: build-renderer
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: [cgit, curl, ripgrep]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native cgit
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends cgit git
+
+      - name: Cache Git repository
+        uses: actions/cache@v4
         with:
           path: /tmp/cgit-repos
-          key: ${{ needs.sync-repos.outputs.cache-key }}
+          key: repo-${{ matrix.repo }}-${{ hashFiles('repos.conf') }}-${{ github.run_id }}
           restore-keys: |
-            cgit-repos-${{ hashFiles('repos.conf') }}-
-            cgit-repos-
+            repo-${{ matrix.repo }}-${{ hashFiles('repos.conf') }}-
+            repo-${{ matrix.repo }}-
 
-      - name: Render all cgit pages in parallel (Rust)
-        run: ./renderer/target/release/cgit-renderer
+      - name: Download cgit-renderer binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cgit-renderer-bin
+          path: bin
 
-      - name: Upload gh-pages artifact
+      - name: Render ${{ matrix.repo }}
+        run: |
+          chmod +x bin/cgit-renderer
+          ./bin/cgit-renderer --repo ${{ matrix.repo }}
+
+      - name: Upload repo artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-${{ matrix.repo }}
+          path: gh-pages/${{ matrix.repo }}.git
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [render-base, render-repo]
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: combined-pages
+
+      - name: Merge all artifacts into gh-pages
+        run: |
+          mkdir -p gh-pages
+          cp -r combined-pages/site-base/* gh-pages/
+          for dir in combined-pages/repo-*; do
+            name=$(basename "$dir" | sed 's/repo-//')
+            echo "Merging $name into gh-pages/${name}.git"
+            mkdir -p "gh-pages/${name}.git"
+            cp -r "$dir"/* "gh-pages/${name}.git/"
+          done
+          echo "Merged structure:"
+          ls -la gh-pages/
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: gh-pages
