@@ -4,43 +4,43 @@ set -e
 rm -rf gh-pages
 mkdir -p gh-pages
 
-echo "Waiting for cgit to start..."
-until curl -s http://localhost:8080/ > /dev/null; do
+echo "Checking container status..."
+docker ps
+docker logs cgit-app
+
+echo "Waiting for cgit HTTP response..."
+for i in {1..30}; do
+    if curl -s -f http://127.0.0.1:8080/ > /dev/null 2>&1; then
+        echo "cgit is UP!"
+        break
+    fi
+    echo "Attempt $i: waiting..."
     sleep 1
 done
 
-echo "Mirroring cgit..."
-# Mirror whole cgit repository view
+echo "Mirroring real cgit website..."
 wget \
-  --mirror \
+  --recursive \
+  --level=5 \
   --convert-links \
   --adjust-extension \
   --page-requisites \
   --no-parent \
   --no-host-directories \
   -P gh-pages \
-  http://localhost:8080/ || true
+  http://127.0.0.1:8080/ || true
 
-# Also grab specific key views to ensure they exist
-for path in \
-  "" \
-  "cgit.css" \
-  "cgit.png" \
-  "favicon.ico" \
-  "git-on-github.git/" \
-  "git-on-github.git/log/" \
-  "git-on-github.git/tree/" \
-  "git-on-github.git/refs/" \
-  "git-on-github.git/about/" \
-  "git-on-github.git/stats/"; do
-  wget -q -P gh-pages -nH -x -k -E "http://localhost:8080/$path" || true
-done
+# Copy static assets directly from container as guarantee
+docker cp cgit-app:/usr/share/cgit/cgit.css gh-pages/ || true
+docker cp cgit-app:/usr/share/cgit/cgit.png gh-pages/ || true
+docker cp cgit-app:/usr/share/cgit/favicon.ico gh-pages/ || true
 
-# Setup entry index.html to redirect or serve the repo directly
+# Setup index.html
 if [ -f gh-pages/git-on-github.git.html ]; then
   cp gh-pages/git-on-github.git.html gh-pages/index.html
-elif [ -d gh-pages/git-on-github.git ]; then
-  cp gh-pages/git-on-github.git/index.html gh-pages/index.html || true
+elif [ -f gh-pages/git-on-github.git/index.html ]; then
+  cp gh-pages/git-on-github.git/index.html gh-pages/index.html
 fi
 
 echo "Scraping complete!"
+ls -la gh-pages
