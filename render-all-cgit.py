@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 import os
+import sys
 import subprocess
 import shutil
 import shlex
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
-OUT_DIR = Path("/out")
-GIT_BASE = Path("/var/git")
-CGITRC = "/etc/cgitrc"
-CONFIG_FILE = Path("/repo/repos.conf")
+WORKSPACE = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
+OUT_DIR = WORKSPACE / "gh-pages"
+GIT_BASE = Path(os.environ.get("CGIT_REPOS_DIR", "/tmp/cgit-repos"))
+CGITRC = str(WORKSPACE / "cgitrc")
+CONFIG_FILE = WORKSPACE / "repos.conf"
+CGIT_BIN = shutil.which("cgit") or "/usr/lib/cgit/cgit.cgi"
 
 def run_git(repo_path, args):
     cmd = ["git", "-C", str(repo_path)] + args
@@ -25,7 +29,7 @@ def run_cgit(path_info, query_string=""):
     env["HTTPS"] = "on"
     env["SCRIPT_NAME"] = ""
     
-    proc = subprocess.run(["/usr/lib/cgit/cgit.cgi"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.run([CGIT_BIN], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output = proc.stdout
     
     header_end = output.find(b"\r\n\r\n")
@@ -148,7 +152,7 @@ def make_404_router():
     function showError(msg) {
       document.title = "404 - Not Found";
       var box = document.getElementById("status-box") || document.body;
-      box.innerHTML = "<div class='error'>404 - Not found: <code>" + path + (search || "") + "</code></div>" +
+      box.innerHTML = "<div class='error'>404 - Page not found: <code>" + path + (search || "") + "</code></div>" +
                       (msg ? "<p>" + msg + "</p>" : "") +
                       "<p><a href='/git-on-github/'>&larr; Return to repository index</a></p>";
     }
@@ -263,9 +267,9 @@ def setup_repos(repos):
         name = r["name"]
         repo_dir = GIT_BASE / f"{name}.git"
         if not repo_dir.exists():
-            print(f"Setting up repository '{name}' from {r['url']} (fetching all branches)...")
+            print(f"Setting up repository '{name}' from {r['url']}...")
             if r["url"] == "local":
-                subprocess.run(["git", "clone", "--bare", "/repo", str(repo_dir)], check=True)
+                subprocess.run(["git", "clone", "--bare", str(WORKSPACE), str(repo_dir)], check=True)
             else:
                 clone_cmd = ["git", "clone", "--bare"]
                 if r["depth"]:
@@ -280,55 +284,59 @@ def setup_repos(repos):
             else:
                 subprocess.run(["git", "-C", str(repo_dir), "config", "gitweb.clone-url", "https://github.com/rebizzz/git-on-github.git"], check=True)
         else:
-            print(f"Updating repository '{name}' (fetching latest commits and all branches)...")
-            if r["url"] != "local":
+            print(f"Updating cached repository '{name}'...")
+            if r["url"] == "local":
+                subprocess.run(["git", "-C", str(repo_dir), "remote", "set-url", "origin", str(WORKSPACE)], check=False)
+                subprocess.run(["git", "-C", str(repo_dir), "fetch", "origin", "+refs/heads/*:refs/heads/*", "--tags", "--prune"], check=False)
+            else:
                 subprocess.run(["git", "-C", str(repo_dir), "fetch", "--all", "--tags", "--prune"], check=False)
             (repo_dir / "description").write_text(r["desc"] + "\n")
             subprocess.run(["git", "-C", str(repo_dir), "config", "gitweb.owner", r["owner"]], check=True)
 
-def render_repository(repo_info):
+def render_task(task):
+    rel_path, path_info, query_string = task
+    content = run_cgit(path_info, query_string)
+    save_page(rel_path, content)
+
+def render_repository(repo_info, pool):
     name = repo_info["name"]
     repo_dir = GIT_BASE / f"{name}.git"
     prefix = f"/{name}.git"
     rel_root = f"{name}.git"
     
-    print(f"\n--- Rendering repository '{name}' ---")
+    print(f"\n--- Queueing tasks for '{name}' ---")
+    tasks = []
     
     # 1. Base views
-    save_page(f"{rel_root}/index.html", run_cgit(f"{prefix}/"))
-    save_page(f"{rel_root}/summary/index.html", run_cgit(f"{prefix}/"))
-    save_page(f"{rel_root}/about/index.html", run_cgit(f"{prefix}/about/"))
-    save_page(f"{rel_root}/refs/index.html", run_cgit(f"{prefix}/refs/"))
-    save_page(f"{rel_root}/stats/index.html", run_cgit(f"{prefix}/stats/"))
+    tasks.append((f"{rel_root}/index.html", f"{prefix}/", ""))
+    tasks.append((f"{rel_root}/summary/index.html", f"{prefix}/", ""))
+    tasks.append((f"{rel_root}/about/index.html", f"{prefix}/about/", ""))
+    tasks.append((f"{rel_root}/refs/index.html", f"{prefix}/refs/", ""))
+    tasks.append((f"{rel_root}/stats/index.html", f"{prefix}/stats/", ""))
+    tasks.append((f"{rel_root}/atom/index.html", f"{prefix}/atom/", ""))
+    tasks.append((f"{rel_root}/atom/index.xml", f"{prefix}/atom/", ""))
+    tasks.append((f"{rel_root}/log/index.html", f"{prefix}/log/", ""))
+    tasks.append((f"{rel_root}/tree/index.html", f"{prefix}/tree/", ""))
     
-    atom_feed = run_cgit(f"{prefix}/atom/")
-    save_page(f"{rel_root}/atom/index.html", atom_feed)
-    save_page(f"{rel_root}/atom/index.xml", atom_feed)
-    
-    save_page(f"{rel_root}/log/index.html", run_cgit(f"{prefix}/log/"))
-    save_page(f"{rel_root}/tree/index.html", run_cgit(f"{prefix}/tree/"))
-    
-    # 2. Branches and Tags (all branches)
+    # 2. Branches and Tags
     branches = run_git(repo_dir, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]).splitlines()
     tags = run_git(repo_dir, ["for-each-ref", "--format=%(refname:short)", "refs/tags"]).splitlines()
     
-    print(f"Rendering {len(branches)} branches and {len(tags)} tags...")
     for b in branches:
         b = b.strip()
         if not b: continue
-        save_page(f"{rel_root}/log/{b}.html", run_cgit(f"{prefix}/log/", f"h={b}"))
-        save_page(f"{rel_root}/tree/{b}.html", run_cgit(f"{prefix}/tree/", f"h={b}"))
+        tasks.append((f"{rel_root}/log/{b}.html", f"{prefix}/log/", f"h={b}"))
+        tasks.append((f"{rel_root}/tree/{b}.html", f"{prefix}/tree/", f"h={b}"))
         
     for t in tags[:25]:
         t = t.strip()
         if not t: continue
-        save_page(f"{rel_root}/tag/{t}.html", run_cgit(f"{prefix}/tag/", f"h={t}"))
-        save_page(f"{rel_root}/commit/{t}.html", run_cgit(f"{prefix}/commit/", f"id={t}"))
+        tasks.append((f"{rel_root}/tag/{t}.html", f"{prefix}/tag/", f"h={t}"))
+        tasks.append((f"{rel_root}/commit/{t}.html", f"{prefix}/commit/", f"id={t}"))
 
     # 3. Commits
-    commit_depth = 50 if repo_info["depth"] else 200
+    commit_depth = 40 if repo_info["depth"] else 150
     commits = run_git(repo_dir, ["rev-list", f"-n{commit_depth}", "--all"]).splitlines()
-    print(f"Rendering {len(commits)} commits for '{name}'...")
     latest_commit = commits[0] if commits else "HEAD"
     
     for sha in commits:
@@ -336,58 +344,51 @@ def render_repository(repo_info):
         if not sha: continue
         short_sha = sha[:7]
         
-        c_html = run_cgit(f"{prefix}/commit/", f"id={sha}")
-        save_page(f"{rel_root}/commit/{sha}.html", c_html)
-        save_page(f"{rel_root}/commit/{short_sha}.html", c_html)
-        
-        d_html = run_cgit(f"{prefix}/diff/", f"id={sha}")
-        save_page(f"{rel_root}/diff/{sha}.html", d_html)
-        save_page(f"{rel_root}/diff/{short_sha}.html", d_html)
-        
-        p_text = run_cgit(f"{prefix}/patch/", f"id={sha}")
-        save_page(f"{rel_root}/patch/{sha}.patch", p_text)
-        save_page(f"{rel_root}/patch/{short_sha}.patch", p_text)
-        
-        t_html = run_cgit(f"{prefix}/tree/", f"id={sha}")
-        save_page(f"{rel_root}/tree/{sha}.html", t_html)
-        save_page(f"{rel_root}/tree/{short_sha}.html", t_html)
+        tasks.append((f"{rel_root}/commit/{sha}.html", f"{prefix}/commit/", f"id={sha}"))
+        tasks.append((f"{rel_root}/commit/{short_sha}.html", f"{prefix}/commit/", f"id={sha}"))
+        tasks.append((f"{rel_root}/diff/{sha}.html", f"{prefix}/diff/", f"id={sha}"))
+        tasks.append((f"{rel_root}/diff/{short_sha}.html", f"{prefix}/diff/", f"id={sha}"))
+        tasks.append((f"{rel_root}/patch/{sha}.patch", f"{prefix}/patch/", f"id={sha}"))
+        tasks.append((f"{rel_root}/patch/{short_sha}.patch", f"{prefix}/patch/", f"id={sha}"))
+        tasks.append((f"{rel_root}/tree/{sha}.html", f"{prefix}/tree/", f"id={sha}"))
+        tasks.append((f"{rel_root}/tree/{short_sha}.html", f"{prefix}/tree/", f"id={sha}"))
         
         parents = run_git(repo_dir, ["log", "-1", "--format=%P", sha]).split()
         for p in parents:
             p_sha = p.strip()
             if p_sha:
-                diff_parent = run_cgit(f"{prefix}/diff/", f"id={sha}&id2={p_sha}")
-                save_page(f"{rel_root}/diff/{sha}_{p_sha}.html", diff_parent)
-                save_page(f"{rel_root}/diff/{short_sha}_{p_sha[:7]}.html", diff_parent)
+                tasks.append((f"{rel_root}/diff/{sha}_{p_sha}.html", f"{prefix}/diff/", f"id={sha}&id2={p_sha}"))
+                tasks.append((f"{rel_root}/diff/{short_sha}_{p_sha[:7]}.html", f"{prefix}/diff/", f"id={sha}&id2={p_sha}"))
 
-    save_page(f"{rel_root}/commit/HEAD.html", run_cgit(f"{prefix}/commit/", f"id={latest_commit}"))
-    save_page(f"{rel_root}/diff/HEAD.html", run_cgit(f"{prefix}/diff/", f"id={latest_commit}"))
-    save_page(f"{rel_root}/patch/HEAD.patch", run_cgit(f"{prefix}/patch/", f"id={latest_commit}"))
-    save_page(f"{rel_root}/tree/HEAD.html", run_cgit(f"{prefix}/tree/", f"id={latest_commit}"))
+    tasks.append((f"{rel_root}/commit/HEAD.html", f"{prefix}/commit/", f"id={latest_commit}"))
+    tasks.append((f"{rel_root}/diff/HEAD.html", f"{prefix}/diff/", f"id={latest_commit}"))
+    tasks.append((f"{rel_root}/patch/HEAD.patch", f"{prefix}/patch/", f"id={latest_commit}"))
+    tasks.append((f"{rel_root}/tree/HEAD.html", f"{prefix}/tree/", f"id={latest_commit}"))
 
     # 4. Files
     files = run_git(repo_dir, ["ls-tree", "-r", "--name-only", "HEAD"]).splitlines()
-    print(f"Rendering {len(files)} files for '{name}'...")
-    
-    capped_files = files if len(files) < 100 else files[:80]
-    sample_commits = commits[:10]
+    capped_files = files if len(files) < 60 else files[:50]
+    sample_commits = commits[:5]
     
     for filepath in capped_files:
         filepath = filepath.strip()
         if not filepath: continue
-        save_page(f"{rel_root}/tree/{filepath}.html", run_cgit(f"{prefix}/tree/{filepath}"))
-        save_page(f"{rel_root}/tree/{filepath}@id=HEAD.html", run_cgit(f"{prefix}/tree/{filepath}", "id=HEAD"))
-        save_page(f"{rel_root}/blame/{filepath}.html", run_cgit(f"{prefix}/blame/{filepath}"))
-        save_page(f"{rel_root}/blame/{filepath}@id=HEAD.html", run_cgit(f"{prefix}/blame/{filepath}", "id=HEAD"))
-        save_page(f"{rel_root}/plain/{filepath}", run_cgit(f"{prefix}/plain/{filepath}"))
+        tasks.append((f"{rel_root}/tree/{filepath}.html", f"{prefix}/tree/{filepath}", ""))
+        tasks.append((f"{rel_root}/tree/{filepath}@id=HEAD.html", f"{prefix}/tree/{filepath}", "id=HEAD"))
+        tasks.append((f"{rel_root}/blame/{filepath}.html", f"{prefix}/blame/{filepath}", ""))
+        tasks.append((f"{rel_root}/blame/{filepath}@id=HEAD.html", f"{prefix}/blame/{filepath}", "id=HEAD"))
+        tasks.append((f"{rel_root}/plain/{filepath}", f"{prefix}/plain/{filepath}", ""))
         
         for sha in sample_commits:
-            save_page(f"{rel_root}/tree/{filepath}@id={sha}.html", run_cgit(f"{prefix}/tree/{filepath}", f"id={sha}"))
-            save_page(f"{rel_root}/tree/{filepath}@id={sha[:7]}.html", run_cgit(f"{prefix}/tree/{filepath}", f"id={sha[:7]}"))
-            save_page(f"{rel_root}/blame/{filepath}@id={sha}.html", run_cgit(f"{prefix}/blame/{filepath}", f"id={sha}"))
-            save_page(f"{rel_root}/blame/{filepath}@id={sha[:7]}.html", run_cgit(f"{prefix}/blame/{filepath}", f"id={sha[:7]}"))
-            save_page(f"{rel_root}/plain/{filepath}@id={sha}", run_cgit(f"{prefix}/plain/{filepath}", f"id={sha}"))
-            save_page(f"{rel_root}/diff/{filepath}@id={sha}.html", run_cgit(f"{prefix}/diff/{filepath}", f"id={sha}"))
+            tasks.append((f"{rel_root}/tree/{filepath}@id={sha}.html", f"{prefix}/tree/{filepath}", f"id={sha}"))
+            tasks.append((f"{rel_root}/tree/{filepath}@id={sha[:7]}.html", f"{prefix}/tree/{filepath}", f"id={sha[:7]}"))
+            tasks.append((f"{rel_root}/blame/{filepath}@id={sha}.html", f"{prefix}/blame/{filepath}", f"id={sha}"))
+            tasks.append((f"{rel_root}/blame/{filepath}@id={sha[:7]}.html", f"{prefix}/blame/{filepath}", f"id={sha[:7]}"))
+            tasks.append((f"{rel_root}/plain/{filepath}@id={sha}", f"{prefix}/plain/{filepath}", f"id={sha}"))
+            tasks.append((f"{rel_root}/diff/{filepath}@id={sha}.html", f"{prefix}/diff/{filepath}", f"id={sha}"))
+
+    print(f"Executing {len(tasks)} parallel render tasks for '{name}'...")
+    list(pool.map(render_task, tasks))
 
     # 5. Dispatchers
     save_page(f"{rel_root}/commit/index.html", make_dispatcher(name, "commit", latest_commit))
@@ -397,6 +398,7 @@ def render_repository(repo_info):
     save_page(f"{rel_root}/log/index.html", make_dispatcher(name, "log", "main" if "main" in branches else "master"))
 
 def main():
+    print(f"cgit binary: {CGIT_BIN}")
     print("Reading repository configuration (repos.conf)...")
     repos = parse_repos_conf()
     print(f"Configured repositories: {[r['name'] for r in repos]}")
@@ -407,27 +409,30 @@ def main():
         shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Render each repository
-    for r in repos:
-        render_repository(r)
+    # Thread pool for fast parallel cgit execution across all CPU cores
+    num_workers = min(32, (os.cpu_count() or 4) * 4)
+    print(f"Starting parallel execution pool with {num_workers} worker threads...")
+    
+    with ThreadPoolExecutor(max_workers=num_workers) as pool:
+        for r in repos:
+            render_repository(r, pool)
         
-    # Render the master cgit repository index page (lists all repos)
     print("\nRendering global cgit repository index...")
     site_index = run_cgit("/")
     save_page("index.html", site_index)
-    
-    # Global 404 router with safe DOMContentLoaded check
     save_page("404.html", make_404_router())
     
-    # Static assets
+    # Assets
     print("Copying cgit static assets...")
-    cgit_share = Path("/usr/share/cgit")
-    save_page("cgit-css/cgit.css", (cgit_share / "cgit.css").read_bytes())
-    save_page("cgit-css/cgit.png", (cgit_share / "cgit.png").read_bytes())
-    save_page("cgit-css/favicon.ico", (cgit_share / "favicon.ico").read_bytes())
-    if (cgit_share / "cgit.js").exists():
-        save_page("cgit.js", (cgit_share / "cgit.js").read_bytes())
-        
+    for share_dir in [Path("/usr/share/cgit"), Path("/nix/var/nix/profiles/default/share/cgit"), WORKSPACE / "gh-pages"]:
+        if (share_dir / "cgit.css").exists():
+            save_page("cgit-css/cgit.css", (share_dir / "cgit.css").read_bytes())
+            save_page("cgit-css/cgit.png", (share_dir / "cgit.png").read_bytes())
+            save_page("cgit-css/favicon.ico", (share_dir / "favicon.ico").read_bytes())
+            if (share_dir / "cgit.js").exists():
+                save_page("cgit.js", (share_dir / "cgit.js").read_bytes())
+            break
+            
     print("\nAll repositories and views rendered successfully!")
 
 if __name__ == "__main__":

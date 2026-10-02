@@ -16,4 +16,4 @@ logo=/git-on-github/cgit-css/cgit.png
 favicon=/git-on-github/cgit-css/favicon.ico
 virtual-root=/git-on-github/
 
-scan-path=/var/git
+scan-path=/tmp/cgit-repos

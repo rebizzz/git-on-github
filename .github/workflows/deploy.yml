@@ -29,15 +29,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build cgit container
-        run: docker build -t cgit-server .
-
-      - name: Run cgit container
+      - name: Install native cgit & dependencies
         run: |
-          docker run -d --name cgit-app -p 8080:80 -v "$GITHUB_WORKSPACE:/repo:ro" cgit-server
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends cgit git python3
 
-      - name: Scrape cgit output
-        run: ./scrape.sh
+      - name: Cache external Git repositories
+        uses: actions/cache@v4
+        with:
+          path: /tmp/cgit-repos
+          key: cgit-repos-${{ hashFiles('repos.conf') }}-${{ github.run_id }}
+          restore-keys: |
+            cgit-repos-${{ hashFiles('repos.conf') }}-
+            cgit-repos-
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Render all cgit pages natively in parallel
+        run: python3 render-all-cgit.py
 
       - name: Upload gh-pages artifact
         if: success()
