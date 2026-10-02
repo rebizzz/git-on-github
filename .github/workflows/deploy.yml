@@ -26,16 +26,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Build cgit container
+        run: docker build -t cgit-server .
 
-      - name: Install dependencies
-        run: npm install
+      - name: Run cgit container
+        run: |
+          docker run -d --name cgit-app -p 8080:80 -v "$GITHUB_WORKSPACE:/repo:ro" cgit-server
 
-      - name: Generate Git Web
-        run: node generate-git-web.js
+      - name: Scrape cgit output
+        run: ./scrape.sh
 
       - name: Upload gh-pages artifact
         if: success()
