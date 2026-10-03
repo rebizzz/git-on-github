@@ -7,6 +7,7 @@ endpoints=(
   "/"
   "/cgit-css/cgit.css"
   "/cgit-css/cgit.png"
+  "/cgit-css/curl-logo.svg"
   "/cgit-css/favicon.ico"
   "/cgit.js"
   "/404.html"
@@ -79,24 +80,23 @@ endpoints=(
   "/ripgrep.git/blame/crates/core/main.rs"
 )
 
-echo "Testing live deployment at: ${BASE_URL} (in parallel)..."
+echo "Testing live deployment at: ${BASE_URL}..."
 
-check_endpoint() {
-  local base="$1"
-  local ep="$2"
-  local url="${base}${ep}"
-  local code
-  code=$(curl -s -o /dev/null -w "%{http_code}" -L "$url")
+failed=0
+for ep in "${endpoints[@]}"; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" -L "${BASE_URL}${ep}")
   if [ "$code" -eq 200 ]; then
-    echo "PASS 200 $ep"
+    echo "  [PASS 200] $ep"
   else
-    echo "FAIL $code $ep"
-    return 1
+    echo "  [FAIL $code] $ep"
+    failed=$((failed + 1))
   fi
-}
-export -f check_endpoint
+done
 
-printf "%s\n" "${endpoints[@]}" | xargs -n 1 -P 16 -I {} bash -c "check_endpoint \"$BASE_URL\" \"{}\"" | sort
+if [ "$failed" -gt 0 ]; then
+  echo "$failed tests failed!"
+  exit 1
+fi
 
 echo ""
 echo "Verifying content integrity..."
@@ -118,7 +118,6 @@ echo "✓ atom/index.xml feed verified"
 curl -s -L "$BASE_URL/curl.git/tree/include/curl/multi.h" | grep -q "<td class=.lines.>"
 echo "✓ tree syntax/line view verified"
 
-# Also verify markdown-body on about page
 curl -s -L "$BASE_URL/cgit.git/about/" | grep -q "class='markdown-body'"
 echo "✓ cgit about markdown-body verified"
 
@@ -127,6 +126,9 @@ echo "✓ curl about markdown-body verified"
 
 curl -s -L "$BASE_URL/ripgrep.git/about/" | grep -q "class='markdown-body'"
 echo "✓ ripgrep about markdown-body verified"
+
+curl -s -L "$BASE_URL/cgit-css/curl-logo.svg" | grep -q "<svg"
+echo "✓ curl-logo.svg asset verified"
 
 echo ""
 echo "ALL TESTS & INTEGRITY CHECKS PASSED!"
