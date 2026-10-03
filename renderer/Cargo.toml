@@ -7,5 +7,10 @@ edition = "2024"
 name = "cgit-renderer"
 path = "src/main.rs"
 
+[[bin]]
+name = "cgit-about-filter"
+path = "src/filter.rs"
+
 [dependencies]
 rayon = "1"
+pulldown-cmark = "0.12"

@@ -49,7 +49,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cgit-renderer-bin
-          path: renderer/target/release/cgit-renderer
+          path: |
+            renderer/target/release/cgit-renderer
+            renderer/target/release/cgit-about-filter
 
   render-base:
     runs-on: ubuntu-latest
@@ -71,7 +73,7 @@ jobs:
 
       - name: Render site base
         run: |
-          chmod +x bin/cgit-renderer
+          chmod +x bin/*
           ./bin/cgit-renderer --base
 
       - name: Upload site-base artifact
@@ -91,10 +93,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install native cgit and markdown tools
+      - name: Install native cgit
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends cgit git python3-markdown python3-pygments
+          sudo apt-get install -y -qq --no-install-recommends cgit git
 
       - name: Cache Git repository
         uses: actions/cache@v4
@@ -113,7 +115,7 @@ jobs:
 
       - name: Render ${{ matrix.repo }}
         run: |
-          chmod +x bin/cgit-renderer
+          chmod +x bin/*
           ./bin/cgit-renderer --repo ${{ matrix.repo }}
 
       - name: Upload repo artifact

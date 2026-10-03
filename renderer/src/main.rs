@@ -89,7 +89,18 @@ impl Config {
         );
         let base_cgitrc_path = workspace.join("cgitrc");
         let base_cgitrc = fs::read_to_string(&base_cgitrc_path).unwrap_or_default();
-        let filter_script = workspace.join("filters/about-formatting.sh");
+        let filter_bin = [
+            workspace.join("bin/cgit-about-filter"),
+            workspace.join("renderer/target/release/cgit-about-filter"),
+            workspace.join("renderer/target/debug/cgit-about-filter"),
+            workspace.join("target/release/cgit-about-filter"),
+            workspace.join("target/debug/cgit-about-filter"),
+            workspace.join("filters/about-formatting.sh"),
+        ]
+        .into_iter()
+        .find(|p| p.exists())
+        .unwrap_or_else(|| workspace.join("filters/about-formatting.sh"));
+
         let cgitrc_path = workspace.join(".cgitrc.runtime");
         let filtered_cgitrc = base_cgitrc
             .lines()
@@ -100,13 +111,13 @@ impl Config {
             format!(
                 "{}about-filter={}\n{}",
                 &filtered_cgitrc[..idx],
-                filter_script.display(),
+                filter_bin.display(),
                 &filtered_cgitrc[idx..]
             )
         } else {
             format!(
                 "about-filter={}\n{}\n",
-                filter_script.display(),
+                filter_bin.display(),
                 filtered_cgitrc
             )
         };
@@ -574,21 +585,29 @@ fn render_repo(cfg: &Config, repo: &Repo) {
 }
 
 fn copy_assets(cfg: &Config) {
-    for file in &["cgit.css", "cgit.png", "favicon.ico"] {
+    for file in &["cgit.css", "cgit.png", "favicon.ico", "curl-logo.svg"] {
         let src = cfg.cgit_share.join(file);
-        if src.exists() {
-            let dst_name = if *file == "cgit.css" || *file == "cgit.png" || *file == "favicon.ico" {
-                format!("cgit-css/{}", file)
-            } else {
-                file.to_string()
-            };
-            let content = fs::read(&src).unwrap_or_default();
-            save_page(&cfg.out_dir, &dst_name, &content);
-        }
+        let local_src = cfg.workspace.join("assets").join(file);
+        let actual_src = if src.exists() {
+            src
+        } else if local_src.exists() {
+            local_src
+        } else {
+            continue;
+        };
+        let dst_name = if *file == "cgit.css" || *file == "cgit.png" || *file == "favicon.ico" || *file == "curl-logo.svg" {
+            format!("cgit-css/{}", file)
+        } else {
+            file.to_string()
+        };
+        let content = fs::read(&actual_src).unwrap_or_default();
+        save_page(&cfg.out_dir, &dst_name, &content);
     }
     let js = cfg.cgit_share.join("cgit.js");
-    if js.exists() {
-        let content = fs::read(&js).unwrap_or_default();
+    let local_js = cfg.workspace.join("assets").join("cgit.js");
+    let actual_js = if js.exists() { js } else { local_js };
+    if actual_js.exists() {
+        let content = fs::read(&actual_js).unwrap_or_default();
         save_page(&cfg.out_dir, "cgit.js", &content);
     }
 }

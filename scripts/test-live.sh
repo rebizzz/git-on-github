@@ -79,21 +79,24 @@ endpoints=(
   "/ripgrep.git/blame/crates/core/main.rs"
 )
 
-echo "Testing live deployment at: ${BASE_URL}"
-passed=0
-failed=0
+echo "Testing live deployment at: ${BASE_URL} (in parallel)..."
 
-for ep in "${endpoints[@]}"; do
-  url="${BASE_URL}${ep}"
+check_endpoint() {
+  local base="$1"
+  local ep="$2"
+  local url="${base}${ep}"
+  local code
   code=$(curl -s -o /dev/null -w "%{http_code}" -L "$url")
   if [ "$code" -eq 200 ]; then
-    echo "  [PASS 200] $ep"
-    passed=$((passed + 1))
+    echo "PASS 200 $ep"
   else
-    echo "  [FAIL $code] $ep"
-    failed=$((failed + 1))
+    echo "FAIL $code $ep"
+    return 1
   fi
-done
+}
+export -f check_endpoint
+
+printf "%s\n" "${endpoints[@]}" | xargs -n 1 -P 16 -I {} bash -c "check_endpoint \"$BASE_URL\" \"{}\"" | sort
 
 echo ""
 echo "Verifying content integrity..."
@@ -115,9 +118,15 @@ echo "✓ atom/index.xml feed verified"
 curl -s -L "$BASE_URL/curl.git/tree/include/curl/multi.h" | grep -q "<td class=.lines.>"
 echo "✓ tree syntax/line view verified"
 
+# Also verify markdown-body on about page
+curl -s -L "$BASE_URL/cgit.git/about/" | grep -q "class='markdown-body'"
+echo "✓ cgit about markdown-body verified"
+
+curl -s -L "$BASE_URL/curl.git/about/" | grep -q "class='markdown-body'"
+echo "✓ curl about markdown-body verified"
+
+curl -s -L "$BASE_URL/ripgrep.git/about/" | grep -q "class='markdown-body'"
+echo "✓ ripgrep about markdown-body verified"
+
 echo ""
-echo "Summary: $passed passed, $failed failed out of ${#endpoints[@]} cases"
-if [ "$failed" -gt 0 ]; then
-  exit 1
-fi
 echo "ALL TESTS & INTEGRITY CHECKS PASSED!"

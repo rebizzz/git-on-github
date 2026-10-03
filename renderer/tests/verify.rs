@@ -30,6 +30,7 @@ fn test_site_output() {
     let css_file = out_dir.join("cgit-css/cgit.css");
     assert!(css_file.exists(), "cgit.css must exist");
     assert!(fs::metadata(&css_file).unwrap().len() > 1000, "cgit.css must not be empty");
+    assert!(out_dir.join("cgit-css/curl-logo.svg").exists(), "curl-logo.svg must exist");
 
     // 4. Verify repositories
     let repos = vec!["cgit", "curl", "ripgrep"];
