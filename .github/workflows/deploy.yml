@@ -151,11 +151,13 @@ jobs:
             mkdir -p "gh-pages/${name}.git"
             cp -r "$dir"/* "gh-pages/${name}.git/"
           done
+          touch gh-pages/.nojekyll
           echo "Merged structure:"
           ls -la gh-pages/
 
       - name: Verify site structure
         run: |
+          test -f gh-pages/.nojekyll
           test -f gh-pages/index.html
           test -f gh-pages/404.html
           test -f gh-pages/cgit-css/cgit.css
@@ -170,6 +172,7 @@ jobs:
           test -f gh-pages/cgit.git/tree/cgit.c/index.html
           test -f gh-pages/ripgrep.git/log/index.html
           test -f gh-pages/git-on-github.git/tree/index.html
+          test -f gh-pages/git-on-github.git/tree/.github/index.html
           test -f gh-pages/git-on-github.git/about/index.html
           echo "All structural sanity checks passed!"
 

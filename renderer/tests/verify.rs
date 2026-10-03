@@ -32,6 +32,7 @@ fn test_site_output() {
     assert!(fs::metadata(&css_file).unwrap().len() > 1000, "cgit.css must not be empty");
     assert!(out_dir.join("cgit-css/curl-logo.svg").exists(), "curl-logo.svg must exist");
     assert!(out_dir.join("cgit-css/theme.css").exists(), "theme.css must exist");
+    assert!(out_dir.join(".nojekyll").exists(), ".nojekyll must exist in gh-pages root");
 
     // 4. Verify repositories
     let repos = vec!["cgit", "curl", "ripgrep", "git-on-github"];
@@ -102,6 +103,9 @@ fn test_site_output() {
         } else if repo == "cgit" {
             assert!(repo_dir.join("tree/cgit.c/index.html").exists(), "cgit.git/tree/cgit.c/index.html must exist");
             assert!(repo_dir.join("plain/cgit.c").exists(), "plain/cgit.c must exist");
+        } else if repo == "git-on-github" {
+            assert!(repo_dir.join("tree/.github/index.html").exists(), "git-on-github.git/tree/.github/index.html must exist");
+            assert!(repo_dir.join("tree/.github/workflows/deploy.yml/index.html").exists(), "deploy.yml tree view must exist");
         }
     }
 

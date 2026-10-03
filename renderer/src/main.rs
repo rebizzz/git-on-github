@@ -731,6 +731,7 @@ fn main() {
         let index = run_cgit(&cfg, "/", "");
         save_page(&cfg.out_dir, "index.html", &index);
         save_str(&cfg.out_dir, "404.html", make_404());
+        save_page(&cfg.out_dir, ".nojekyll", b"");
         copy_assets(&cfg);
         println!("Site base complete!");
         return;
