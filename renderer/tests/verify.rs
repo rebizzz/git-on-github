@@ -49,6 +49,8 @@ fn test_site_output() {
         // About
         let about = repo_dir.join("about/index.html");
         assert!(about.exists(), "About view for {} must exist", repo);
+        let about_content = fs::read_to_string(&about).unwrap();
+        assert!(about_content.contains("class='markdown-body'"), "About view for {} must contain markdown-body", repo);
 
         // Refs
         let refs = repo_dir.join("refs/index.html");

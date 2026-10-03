@@ -91,10 +91,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install native cgit
+      - name: Install native cgit and markdown tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends cgit git
+          sudo apt-get install -y -qq --no-install-recommends cgit git python3-markdown python3-pygments
 
       - name: Cache Git repository
         uses: actions/cache@v4

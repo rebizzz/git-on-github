@@ -87,7 +87,31 @@ impl Config {
                 "/usr/share/cgit".into()
             }),
         );
-        let cgitrc = workspace.join("cgitrc");
+        let base_cgitrc_path = workspace.join("cgitrc");
+        let base_cgitrc = fs::read_to_string(&base_cgitrc_path).unwrap_or_default();
+        let filter_script = workspace.join("filters/about-formatting.sh");
+        let cgitrc_path = workspace.join(".cgitrc.runtime");
+        let filtered_cgitrc = base_cgitrc
+            .lines()
+            .filter(|l| !l.trim().starts_with("about-filter="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let runtime_cgitrc = if let Some(idx) = filtered_cgitrc.find("scan-path=") {
+            format!(
+                "{}about-filter={}\n{}",
+                &filtered_cgitrc[..idx],
+                filter_script.display(),
+                &filtered_cgitrc[idx..]
+            )
+        } else {
+            format!(
+                "about-filter={}\n{}\n",
+                filter_script.display(),
+                filtered_cgitrc
+            )
+        };
+        fs::write(&cgitrc_path, runtime_cgitrc).ok();
+        let cgitrc = cgitrc_path;
         let repos_conf = workspace.join("repos.conf");
         Config { workspace, out_dir, git_base, cgitrc, cgit_bin, cgit_share, repos_conf }
     }
@@ -168,6 +192,7 @@ fn run_git(repo_path: &Path, args: &[&str]) -> String {
 
 fn run_cgit(cfg: &Config, path_info: &str, query_string: &str) -> Vec<u8> {
     let out = Command::new(&cfg.cgit_bin)
+        .current_dir(&cfg.workspace)
         .env("CGIT_CONFIG", &cfg.cgitrc)
         .env("PATH_INFO", path_info)
         .env("QUERY_STRING", query_string)

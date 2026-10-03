@@ -11,6 +11,7 @@ summary-log=50
 max-stats=quarter
 readme=:README.md
 readme=:README
+about-filter=filters/about-formatting.sh
 css=/git-on-github/cgit-css/cgit.css
 logo=/git-on-github/cgit-css/cgit.png
 favicon=/git-on-github/cgit-css/favicon.ico
