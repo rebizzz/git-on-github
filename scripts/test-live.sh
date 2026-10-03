@@ -93,6 +93,7 @@ endpoints=(
   "/git-on-github.git/tree/repos.conf"
   "/git-on-github.git/plain/repos.conf"
   "/git-on-github.git/tree/.github"
+  "/git-on-github.git/tree/.github/workflows"
   "/git-on-github.git/tree/.github/workflows/deploy.yml"
   "/git-on-github.git/tree/renderer/src/main.rs"
   "/git-on-github.git/plain/renderer/src/main.rs"

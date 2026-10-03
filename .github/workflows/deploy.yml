@@ -110,14 +110,6 @@ jobs:
             repo-git-${{ matrix.repo }}-${{ hashFiles('repos.conf') }}-
             repo-git-${{ matrix.repo }}-
 
-      - name: Cache rendered pages
-        uses: actions/cache@v4
-        with:
-          path: gh-pages/${{ matrix.repo }}.git
-          key: repo-pages-${{ matrix.repo }}-${{ hashFiles('renderer/**', 'cgitrc', 'repos.conf') }}-${{ github.run_id }}
-          restore-keys: |
-            repo-pages-${{ matrix.repo }}-${{ hashFiles('renderer/**', 'cgitrc', 'repos.conf') }}-
-
       - name: Download cgit-renderer binary
         uses: actions/download-artifact@v4
         with:
@@ -182,13 +174,27 @@ jobs:
           test -f gh-pages/ripgrep.git/log/index.html
           test -f gh-pages/git-on-github.git/tree/index.html
           test -f gh-pages/git-on-github.git/tree/.github/index.html
+          test -f gh-pages/git-on-github.git/tree/.github/workflows/index.html
+          test -f gh-pages/git-on-github.git/tree/.github/workflows/deploy.yml/index.html
           test -f gh-pages/git-on-github.git/about/index.html
           echo "All structural sanity checks passed!"
 
+      - name: Archive Pages artifact
+        shell: sh
+        run: |
+          tar \
+            --dereference --hard-dereference \
+            --directory gh-pages \
+            -cvf "$RUNNER_TEMP/artifact.tar" \
+            --exclude=.git \
+            .
+
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          path: gh-pages
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
 
       - name: Deploy to GitHub Pages
         if: github.event_name != 'pull_request'

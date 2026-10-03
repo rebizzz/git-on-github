@@ -105,6 +105,7 @@ fn test_site_output() {
             assert!(repo_dir.join("plain/cgit.c").exists(), "plain/cgit.c must exist");
         } else if repo == "git-on-github" {
             assert!(repo_dir.join("tree/.github/index.html").exists(), "git-on-github.git/tree/.github/index.html must exist");
+            assert!(repo_dir.join("tree/.github/workflows/index.html").exists(), "workflows directory tree view must exist");
             assert!(repo_dir.join("tree/.github/workflows/deploy.yml/index.html").exists(), "deploy.yml tree view must exist");
         }
     }

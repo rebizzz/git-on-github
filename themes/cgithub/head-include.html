@@ -5,16 +5,127 @@
 <link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/theme.css"/>
 
 <script>
-    "use strict";
-    function hlBlob() {
-        const blob = document.querySelector("div#cgit table.blob td.lines pre code");
-        const path = document.querySelector("div#cgit div.path a:last-child");
-        if (blob !== null && path !== null) {
-            blob.classList.add("language-" + path.textContent.split(".").pop());
-            if (window.hljs) {
-                hljs.highlightElement(blob);
+"use strict";
+function initCgitSearch() {
+    var searchInputs = document.querySelectorAll("input[type='search'], input[name='q']");
+    if (!searchInputs.length) return;
+
+    var urlParams = new URLSearchParams(window.location.search);
+    var queryParam = urlParams.get('q') || '';
+
+    searchInputs.forEach(function(input) {
+        if (queryParam) {
+            input.value = queryParam;
+        }
+
+        var form = input.closest('form');
+        if (form) {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                performSearch(input.value.trim());
+                var newUrl = new URL(window.location);
+                if (input.value.trim()) {
+                    newUrl.searchParams.set('q', input.value.trim());
+                } else {
+                    newUrl.searchParams.delete('q');
+                }
+                window.history.replaceState({}, '', newUrl);
+            });
+        }
+
+        input.addEventListener('input', function() {
+            performSearch(input.value.trim());
+            var newUrl = new URL(window.location);
+            if (input.value.trim()) {
+                newUrl.searchParams.set('q', input.value.trim());
+            } else {
+                newUrl.searchParams.delete('q');
             }
+            window.history.replaceState({}, '', newUrl);
+        });
+    });
+
+    if (queryParam) {
+        performSearch(queryParam);
+    }
+}
+
+function performSearch(term) {
+    var lower = term.toLowerCase();
+
+    // 1. Root index repository list
+    var repoTable = document.querySelector("table[summary='repository list']");
+    if (repoTable) {
+        var rows = repoTable.querySelectorAll("tr:not(.nohover)");
+        var matched = 0;
+        rows.forEach(function(row) {
+            var text = row.textContent.toLowerCase();
+            if (!lower || text.includes(lower)) {
+                row.style.display = '';
+                matched++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        var noMatch = document.getElementById('no-repo-match');
+        if (!matched) {
+            if (!noMatch) {
+                noMatch = document.createElement('div');
+                noMatch.id = 'no-repo-match';
+                noMatch.className = 'error';
+                noMatch.style.margin = '1em';
+                noMatch.textContent = 'No matching repositories found.';
+                repoTable.parentNode.appendChild(noMatch);
+            }
+            noMatch.style.display = '';
+        } else if (noMatch) {
+            noMatch.style.display = 'none';
+        }
+        return;
+    }
+
+    // 2. Commit log list
+    var logTable = document.querySelector("table.list");
+    if (logTable && (window.location.pathname.includes('/log') || document.querySelector("table.tabs a.active[href*='/log']"))) {
+        var logRows = logTable.querySelectorAll("tr:not(.nohover)");
+        logRows.forEach(function(row) {
+            var text = row.textContent.toLowerCase();
+            row.style.display = (!lower || text.includes(lower)) ? '' : 'none';
+        });
+        return;
+    }
+
+    // 3. Tree listing
+    var treeTable = document.querySelector("table[summary='tree listing']");
+    if (treeTable) {
+        var treeRows = treeTable.querySelectorAll("tr:not(.nohover)");
+        treeRows.forEach(function(row) {
+            var text = row.textContent.toLowerCase();
+            row.style.display = (!lower || text.includes(lower)) ? '' : 'none';
+        });
+        return;
+    }
+}
+
+function hlBlob() {
+    const blob = document.querySelector("div#cgit table.blob td.lines pre code");
+    const path = document.querySelector("div#cgit div.path a:last-child");
+    if (blob !== null && path !== null) {
+        blob.classList.add("language-" + path.textContent.split(".").pop());
+        if (window.hljs) {
+            hljs.highlightElement(blob);
         }
     }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        initCgitSearch();
+        hlBlob();
+    });
+} else {
+    initCgitSearch();
+    hlBlob();
+}
 </script>
 <script src="/git-on-github/cgit-css/highlight.min.js" onload="hlBlob()" defer></script>
