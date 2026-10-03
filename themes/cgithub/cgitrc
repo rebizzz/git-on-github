@@ -1,0 +1,31 @@
+root-title=Git Repository Browser
+root-desc=cgit web interface
+robots=noindex, nofollow, noarchive, notranslate
+
+css=/git-on-github/cgit-css/cgit.css
+logo=/git-on-github/cgit-css/cgit.png
+favicon=/git-on-github/cgit-css/favicon.ico
+virtual-root=/git-on-github/
+
+enable-blame=1
+enable-commit-graph=0
+enable-index-links=1
+enable-log-filecount=0
+enable-log-linecount=1
+enable-index-owner=0
+enable-remote-branches=1
+max-stats=year
+
+snapshots=.tar.gz
+max-blob-size=1000
+enable-http-clone=0
+
+readme=:README.md
+readme=:README.txt
+readme=:README
+readme=:INSTALL.md
+readme=:INSTALL.txt
+readme=:INSTALL
+
+max-repo-count=100
+enable-git-config=1

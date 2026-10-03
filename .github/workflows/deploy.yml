@@ -7,7 +7,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: '0 */2 * * *'
 
 concurrency:
   group: deploy
@@ -88,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repo: [cgit, curl, ripgrep]
+        repo: [cgit, curl, ripgrep, git-on-github]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -159,6 +159,7 @@ jobs:
           test -f gh-pages/index.html
           test -f gh-pages/404.html
           test -f gh-pages/cgit-css/cgit.css
+          test -f gh-pages/cgit-css/theme.css
           test -f gh-pages/curl.git/tree/src/index.html
           test -f gh-pages/curl.git/tree/include/curl/multi.h/index.html
           test -f gh-pages/curl.git/tree/include/curl/multi.h.html
@@ -168,6 +169,8 @@ jobs:
           test -f gh-pages/cgit.git/tree/index.html
           test -f gh-pages/cgit.git/tree/cgit.c/index.html
           test -f gh-pages/ripgrep.git/log/index.html
+          test -f gh-pages/git-on-github.git/tree/index.html
+          test -f gh-pages/git-on-github.git/about/index.html
           echo "All structural sanity checks passed!"
 
       - name: Upload Pages artifact

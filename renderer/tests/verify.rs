@@ -14,7 +14,7 @@ fn test_site_output() {
     assert!(index_file.exists(), "Root index.html must exist");
     let index_content = fs::read_to_string(&index_file).expect("Failed to read root index.html");
     assert!(index_content.contains("<div id='cgit'>"), "Root index must contain cgit container");
-    assert!(index_content.contains("Git repository browser"), "Root index must contain title");
+    assert!(index_content.to_lowercase().contains("git repository browser"), "Root index must contain title");
     assert!(index_content.contains("cgit.git"), "Root index must list cgit.git");
     assert!(index_content.contains("curl.git"), "Root index must list curl.git");
     assert!(index_content.contains("ripgrep.git"), "Root index must list ripgrep.git");
@@ -31,9 +31,10 @@ fn test_site_output() {
     assert!(css_file.exists(), "cgit.css must exist");
     assert!(fs::metadata(&css_file).unwrap().len() > 1000, "cgit.css must not be empty");
     assert!(out_dir.join("cgit-css/curl-logo.svg").exists(), "curl-logo.svg must exist");
+    assert!(out_dir.join("cgit-css/theme.css").exists(), "theme.css must exist");
 
     // 4. Verify repositories
-    let repos = vec!["cgit", "curl", "ripgrep"];
+    let repos = vec!["cgit", "curl", "ripgrep", "git-on-github"];
     for repo in repos {
         let repo_dir = out_dir.join(format!("{}.git", repo));
         if !repo_dir.exists() {

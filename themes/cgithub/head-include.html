@@ -1,0 +1,20 @@
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/github.min.css"/>
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/github-dark.min.css"/>
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/theme.css"/>
+
+<script>
+    "use strict";
+    function hlBlob() {
+        const blob = document.querySelector("div#cgit table.blob td.lines pre code");
+        const path = document.querySelector("div#cgit div.path a:last-child");
+        if (blob !== null && path !== null) {
+            blob.classList.add("language-" + path.textContent.split(".").pop());
+            if (window.hljs) {
+                hljs.highlightElement(blob);
+            }
+        }
+    }
+</script>
+<script src="/git-on-github/cgit-css/highlight.min.js" onload="hlBlob()" defer></script>

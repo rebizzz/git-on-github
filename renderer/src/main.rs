@@ -15,10 +15,11 @@ struct Config {
     cgit_bin: PathBuf,
     cgit_share: PathBuf,
     repos_conf: PathBuf,
+    theme_dir: PathBuf,
 }
 
 impl Config {
-    fn new() -> Self {
+    fn from_args(args: &[String]) -> Self {
         let workspace = PathBuf::from(
             env::var("GITHUB_WORKSPACE")
                 .unwrap_or_else(|_| {
@@ -87,7 +88,53 @@ impl Config {
                 "/usr/share/cgit".into()
             }),
         );
-        let base_cgitrc_path = workspace.join("cgitrc");
+
+        let theme_arg = args.windows(2).find(|w| w[0] == "--theme").map(|w| w[1].clone());
+        let theme_dir = theme_arg
+            .or_else(|| env::var("CGIT_THEME").ok())
+            .map(|t| {
+                let p = PathBuf::from(&t);
+                if p.is_absolute() && p.exists() {
+                    p
+                } else if workspace.join(&t).exists() {
+                    workspace.join(&t)
+                } else if workspace.join("themes").join(&t).exists() {
+                    workspace.join("themes").join(&t)
+                } else {
+                    p
+                }
+            })
+            .unwrap_or_else(|| {
+                if workspace.join("themes/cgithub").exists() {
+                    workspace.join("themes/cgithub")
+                } else if workspace.join("theme").exists() {
+                    workspace.join("theme")
+                } else {
+                    workspace.join("themes/cgithub")
+                }
+            });
+
+        let cgitrc_arg = args.windows(2).find(|w| w[0] == "--cgitrc").map(|w| w[1].clone());
+        let base_cgitrc_path = cgitrc_arg
+            .or_else(|| env::var("CGITRC").ok())
+            .map(|c| {
+                let p = PathBuf::from(&c);
+                if p.is_absolute() && p.exists() {
+                    p
+                } else if workspace.join(&c).exists() {
+                    workspace.join(&c)
+                } else {
+                    p
+                }
+            })
+            .unwrap_or_else(|| {
+                if theme_dir.join("cgitrc").exists() {
+                    theme_dir.join("cgitrc")
+                } else {
+                    workspace.join("cgitrc")
+                }
+            });
+
         let base_cgitrc = fs::read_to_string(&base_cgitrc_path).unwrap_or_default();
         let filter_bin = [
             workspace.join("bin/cgit-about-filter"),
@@ -101,30 +148,37 @@ impl Config {
         .find(|p| p.exists())
         .unwrap_or_else(|| workspace.join("filters/about-formatting.sh"));
 
+        let head_include_path = if theme_dir.join("head-include.html").exists() {
+            Some(theme_dir.join("head-include.html"))
+        } else if workspace.join("head-include.html").exists() {
+            Some(workspace.join("head-include.html"))
+        } else {
+            None
+        };
+
         let cgitrc_path = workspace.join(".cgitrc.runtime");
         let filtered_cgitrc = base_cgitrc
             .lines()
-            .filter(|l| !l.trim().starts_with("about-filter="))
+            .filter(|l| {
+                let t = l.trim();
+                !t.starts_with("about-filter=")
+                    && !t.starts_with("head-include=")
+                    && !t.starts_with("scan-path=")
+            })
             .collect::<Vec<_>>()
             .join("\n");
-        let runtime_cgitrc = if let Some(idx) = filtered_cgitrc.find("scan-path=") {
-            format!(
-                "{}about-filter={}\n{}",
-                &filtered_cgitrc[..idx],
-                filter_bin.display(),
-                &filtered_cgitrc[idx..]
-            )
-        } else {
-            format!(
-                "about-filter={}\n{}\n",
-                filter_bin.display(),
-                filtered_cgitrc
-            )
-        };
+
+        let mut runtime_cgitrc = filtered_cgitrc;
+        runtime_cgitrc.push_str(&format!("\nabout-filter={}\n", filter_bin.display()));
+        if let Some(ref hi) = head_include_path {
+            runtime_cgitrc.push_str(&format!("head-include={}\n", hi.display()));
+        }
+        runtime_cgitrc.push_str(&format!("scan-path={}\n", git_base.display()));
+
         fs::write(&cgitrc_path, runtime_cgitrc).ok();
         let cgitrc = cgitrc_path;
         let repos_conf = workspace.join("repos.conf");
-        Config { workspace, out_dir, git_base, cgitrc, cgit_bin, cgit_share, repos_conf }
+        Config { workspace, out_dir, git_base, cgitrc, cgit_bin, cgit_share, repos_conf, theme_dir }
     }
 }
 
@@ -258,8 +312,12 @@ fn make_dispatcher(repo_name: &str, kind: &str, default_target: &str) -> String 
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>cgit {kind}</title>
 <link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/cgit.css">
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/github.min.css"/>
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/github-dark.min.css"/>
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/theme.css">
 </head>
 <body>
 <div id="cgit">
@@ -298,8 +356,12 @@ fn make_404() -> &'static str {
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>404</title>
 <link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/cgit.css">
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/github.min.css"/>
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/github-dark.min.css"/>
+<link rel="stylesheet" type="text/css" href="/git-on-github/cgit-css/theme.css">
 </head>
 <body>
 <div id="cgit">
@@ -614,6 +676,22 @@ fn copy_assets(cfg: &Config) {
         let content = fs::read(&actual_src).unwrap_or_default();
         save_page(&cfg.out_dir, &dst_name, &content);
     }
+
+    if cfg.theme_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&cfg.theme_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let fname = path.file_name().unwrap().to_string_lossy();
+                    if fname.ends_with(".css") || fname.ends_with(".js") || fname.ends_with(".png") || fname.ends_with(".svg") || fname.ends_with(".ico") || fname.ends_with(".html") {
+                        let content = fs::read(&path).unwrap_or_default();
+                        save_page(&cfg.out_dir, &format!("cgit-css/{}", fname), &content);
+                    }
+                }
+            }
+        }
+    }
+
     let js = cfg.cgit_share.join("cgit.js");
     let local_js = cfg.workspace.join("assets").join("cgit.js");
     let actual_js = if js.exists() { js } else { local_js };
@@ -624,8 +702,8 @@ fn copy_assets(cfg: &Config) {
 }
 
 fn main() {
-    let cfg = Config::new();
     let args: Vec<String> = env::args().collect();
+    let cfg = Config::from_args(&args);
     
     let repo_filter = args.windows(2).find(|w| w[0] == "--repo").map(|w| w[1].clone());
     let base_only = args.iter().any(|a| a == "--base");

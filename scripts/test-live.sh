@@ -7,6 +7,7 @@ endpoints=(
   "/"
   "/cgit-css/cgit.css"
   "/cgit-css/cgit.png"
+  "/cgit-css/theme.css"
   "/cgit-css/curl-logo.svg"
   "/cgit-css/favicon.ico"
   "/cgit.js"
@@ -78,6 +79,22 @@ endpoints=(
   "/ripgrep.git/tree/crates/core/main.rs"
   "/ripgrep.git/plain/crates/core/main.rs"
   "/ripgrep.git/blame/crates/core/main.rs"
+
+  "/git-on-github.git/"
+  "/git-on-github.git/about/"
+  "/git-on-github.git/refs/"
+  "/git-on-github.git/log/"
+  "/git-on-github.git/tree/"
+  "/git-on-github.git/stats/"
+  "/git-on-github.git/atom/index.xml"
+  "/git-on-github.git/commit/HEAD.html"
+  "/git-on-github.git/diff/HEAD.html"
+  "/git-on-github.git/patch/HEAD.patch"
+  "/git-on-github.git/tree/repos.conf"
+  "/git-on-github.git/plain/repos.conf"
+  "/git-on-github.git/tree/renderer/src/main.rs"
+  "/git-on-github.git/plain/renderer/src/main.rs"
+  "/git-on-github.git/blame/renderer/src/main.rs"
 )
 
 echo "Testing live deployment at: ${BASE_URL}..."
@@ -109,6 +126,9 @@ echo "✓ ripgrep main.rs plain content verified"
 curl -s -L "$BASE_URL/cgit.git/plain/cgit.c" | grep -q "main("
 echo "✓ cgit cgit.c plain content verified"
 
+curl -s -L "$BASE_URL/git-on-github.git/plain/renderer/src/main.rs" | grep -q "fn main"
+echo "✓ git-on-github renderer main.rs plain content verified"
+
 curl -s -L "$BASE_URL/curl.git/patch/HEAD.patch" | grep -q "diff --git"
 echo "✓ patch/HEAD.patch format verified"
 
@@ -127,8 +147,14 @@ echo "✓ curl about markdown-body verified"
 curl -s -L "$BASE_URL/ripgrep.git/about/" | grep -q "class='markdown-body'"
 echo "✓ ripgrep about markdown-body verified"
 
+curl -s -L "$BASE_URL/git-on-github.git/about/" | grep -q "class='markdown-body'"
+echo "✓ git-on-github about markdown-body verified"
+
 curl -s -L "$BASE_URL/cgit-css/curl-logo.svg" | grep -q "<svg"
 echo "✓ curl-logo.svg asset verified"
+
+curl -s -L "$BASE_URL/cgit-css/theme.css" | grep -q "prefers-color-scheme"
+echo "✓ theme.css modern cgithub theme verified"
 
 echo ""
 echo "ALL TESTS & INTEGRITY CHECKS PASSED!"
