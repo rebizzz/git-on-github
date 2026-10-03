@@ -37,7 +37,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             renderer/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('renderer/Cargo.toml', 'renderer/src/**') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('renderer/Cargo.toml', 'renderer/Cargo.lock', 'renderer/src/**') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -101,11 +101,19 @@ jobs:
       - name: Cache Git repository
         uses: actions/cache@v4
         with:
-          path: /tmp/cgit-repos
-          key: repo-${{ matrix.repo }}-${{ hashFiles('repos.conf') }}-${{ github.run_id }}
+          path: /tmp/cgit-repos/${{ matrix.repo }}.git
+          key: repo-git-${{ matrix.repo }}-${{ hashFiles('repos.conf') }}-${{ github.run_id }}
           restore-keys: |
-            repo-${{ matrix.repo }}-${{ hashFiles('repos.conf') }}-
-            repo-${{ matrix.repo }}-
+            repo-git-${{ matrix.repo }}-${{ hashFiles('repos.conf') }}-
+            repo-git-${{ matrix.repo }}-
+
+      - name: Cache rendered pages
+        uses: actions/cache@v4
+        with:
+          path: gh-pages/${{ matrix.repo }}.git
+          key: repo-pages-${{ matrix.repo }}-${{ hashFiles('renderer/**', 'cgitrc', 'repos.conf') }}-${{ github.run_id }}
+          restore-keys: |
+            repo-pages-${{ matrix.repo }}-${{ hashFiles('renderer/**', 'cgitrc', 'repos.conf') }}-
 
       - name: Download cgit-renderer binary
         uses: actions/download-artifact@v4

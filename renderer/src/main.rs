@@ -456,6 +456,16 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     }
     let latest_commit = commits.first().cloned().unwrap_or_else(|| "HEAD".to_string());
 
+    let stamp_file = cfg.out_dir.join(&rel).join(".rendered-commit");
+    if stamp_file.exists() && cfg.out_dir.join(&rel).join("tree/index.html").exists() {
+        if let Ok(stamped) = fs::read_to_string(&stamp_file) {
+            if stamped.trim() == latest_commit.trim() {
+                println!("Repo '{}' already rendered at commit {}, skipping rendering!", repo.name, latest_commit);
+                return;
+            }
+        }
+    }
+
     let mut tasks: Vec<Task> = Vec::new();
 
     macro_rules! t {
@@ -580,6 +590,7 @@ fn render_repo(cfg: &Config, repo: &Repo) {
     save_str(out_dir, &format!("{rel}/patch/index.html"),  make_patch_dispatcher());
     save_str(out_dir, &format!("{rel}/tree/index.html"),   &make_dispatcher(&repo.name, "tree", default_branch));
     save_str(out_dir, &format!("{rel}/log/index.html"),    &make_dispatcher(&repo.name, "log",  default_branch));
+    save_str(out_dir, &format!("{rel}/.rendered-commit"),  &latest_commit);
 
     println!("Done '{}'", repo.name);
 }
