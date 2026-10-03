@@ -75,12 +75,15 @@ jobs:
         run: |
           chmod +x bin/*
           ./bin/cgit-renderer --base
+          echo "=== Site base generated files ==="
+          ls -la gh-pages/
 
       - name: Upload site-base artifact
         uses: actions/upload-artifact@v4
         with:
           name: site-base
           path: gh-pages/
+          include-hidden-files: true
 
   render-repo:
     runs-on: ubuntu-latest
@@ -131,6 +134,7 @@ jobs:
         with:
           name: repo-${{ matrix.repo }}
           path: gh-pages/${{ matrix.repo }}.git
+          include-hidden-files: true
 
   deploy:
     runs-on: ubuntu-latest
@@ -144,6 +148,11 @@ jobs:
       - name: Merge all artifacts into gh-pages
         run: |
           mkdir -p gh-pages
+          shopt -s dotglob
+          echo "=== Contents of combined-pages ==="
+          ls -la combined-pages/
+          echo "=== Contents of combined-pages/site-base ==="
+          ls -la combined-pages/site-base/
           cp -r combined-pages/site-base/* gh-pages/
           for dir in combined-pages/repo-*; do
             name=$(basename "$dir" | sed 's/repo-//')
@@ -152,7 +161,7 @@ jobs:
             cp -r "$dir"/* "gh-pages/${name}.git/"
           done
           touch gh-pages/.nojekyll
-          echo "Merged structure:"
+          echo "=== Merged structure ==="
           ls -la gh-pages/
 
       - name: Verify site structure
